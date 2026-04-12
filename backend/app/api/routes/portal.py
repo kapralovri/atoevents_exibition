@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Optional, List, Dict
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -67,6 +68,223 @@ def me(user: Annotated[User, Depends(get_current_user)], db: Session = Depends(g
         "email": user.email,
         "exhibitors": [{"id": e.id, "event_id": e.event_id, "company_name": e.company_name} for e in rows],
     }
+
+
+@router.get("/me/exhibitor")
+def me_exhibitor(user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Convenience endpoint: returns the current user's first exhibitor record + event context."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found for this user")
+    ev = _event(db, ex.event_id)
+    refresh_exhibitor_locks(ex, ev)
+    db.commit()
+    db.refresh(ex)
+    return {
+        "id": ex.id,
+        "company_name": ex.company_name,
+        "event_id": ex.event_id,
+        "event_name": ev.name,
+        "stand_package": ex.stand_package,
+        "stand_configuration": ex.stand_configuration,
+        "area_m2": ex.area_m2,
+        "booth_type": ex.stand_package,
+        "booth_size": ex.area_m2,
+        "graphics_status": ex.graphics_status,
+        "description_status": ex.company_status,
+        "participants_status": ex.participants_status,
+        "overall_status": "complete" if ex.fully_locked else (
+            "in_progress" if any([
+                ex.graphics_status not in ("NOT_STARTED", None),
+                ex.company_status not in ("NOT_STARTED", None),
+                ex.participants_status not in ("NOT_STARTED", None),
+            ]) else "not_started"
+        ),
+        "deadline_graphics": str(ev.deadline_graphics_initial) if ev.deadline_graphics_initial else None,
+        "deadline_company_profile": str(ev.deadline_company_profile) if ev.deadline_company_profile else None,
+        "deadline_participants": str(ev.deadline_participants) if ev.deadline_participants else None,
+        "deadline_final_graphics": str(ev.deadline_final_graphics) if ev.deadline_final_graphics else None,
+        "needs_manual_modal": ex.manual_acknowledged_at is None,
+        "gdpr_ok": ex.gdpr_consent_at is not None,
+        "locks": {
+            "graphics": ex.section_graphics_locked,
+            "company": ex.section_company_locked,
+            "participants": ex.section_participants_locked,
+        },
+        # Description page reads these directly from /me/exhibitor
+        "description": (lambda cp: cp.description if cp else "")(
+            db.query(CompanyProfile).filter(CompanyProfile.exhibitor_id == ex.id).first()
+        ),
+        # Participants page reads participants list directly from /me/exhibitor
+        "participants": [
+            {
+                "id": str(p.id),
+                "full_name": f"{p.first_name} {p.last_name}".strip(),
+                "first_name": p.first_name,
+                "last_name": p.last_name,
+                "email": p.email,
+                "job_title": p.job_title,
+                "phone": p.phone or "",
+            }
+            for p in db.query(Participant).filter(Participant.exhibitor_id == ex.id).all()
+        ],
+    }
+
+
+@router.get("/me/exhibitor/graphics")
+def me_exhibitor_graphics(user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    """Convenience endpoint: returns graphic slots for the current user's exhibitor."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found for this user")
+    slots = slots_for_exhibitor(ex.stand_package, ex.stand_configuration, ex.area_m2)
+    uploads = {
+        u.slot_key: u
+        for u in db.query(GraphicUpload).filter(GraphicUpload.exhibitor_id == ex.id).all()
+    }
+    result = []
+    for slot in slots:
+        upload = uploads.get(slot.key)
+        result.append({
+            "name": slot.key,
+            "label": slot.label,
+            "required": slot.required,
+            "status": upload.validation_status if upload else "PENDING",
+            "preview_url": storage.presign_get(upload.preview_s3_key) if (upload and upload.preview_s3_key) else None,
+        })
+    return result
+
+
+class _MeCompanyUpdate(BaseModel):
+    company_description: Optional[str] = None
+    company_name: Optional[str] = None
+    website: Optional[str] = None
+    logo_s3_key: Optional[str] = None
+
+
+class _MeParticipantsBulk(BaseModel):
+    participants: List[Dict[str, Any]]
+
+
+@router.patch("/me/exhibitor/company")
+def me_patch_company(
+    body: _MeCompanyUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Convenience: update company profile for current user's exhibitor."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if ex.section_company_locked or ex.company_status == "APPROVED":
+        raise HTTPException(403, "Locked")
+    cp = db.query(CompanyProfile).filter(CompanyProfile.exhibitor_id == ex.id).first()
+    if not cp:
+        cp = CompanyProfile(exhibitor_id=ex.id, company_name=ex.company_name, website="", description="")
+        db.add(cp)
+    if body.company_name is not None:
+        cp.company_name = body.company_name
+    if body.website is not None:
+        cp.website = body.website
+    if body.company_description is not None:
+        cp.description = body.company_description
+    if body.logo_s3_key is not None:
+        cp.logo_s3_key = body.logo_s3_key
+    ex.company_status = "DRAFT"
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/me/exhibitor/description/submit")
+def me_submit_description(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Convenience: submit company description for review."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if ex.section_company_locked:
+        raise HTTPException(403, "Locked")
+    ex.company_status = "UNDER_REVIEW"
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.put("/me/exhibitor/participants")
+def me_put_participants(
+    body: _MeParticipantsBulk,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Convenience: bulk-replace participants list for current user's exhibitor."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if ex.section_participants_locked:
+        raise HTTPException(403, "Locked")
+    # Delete existing and replace
+    db.query(Participant).filter(Participant.exhibitor_id == ex.id).delete()
+    quota = max(1, int(ex.area_m2 // 9))
+    complimentary_count = 0
+    for p_data in body.participants:
+        badge = "COMPLIMENTARY" if complimentary_count < quota else "ADDITIONAL"
+        if badge == "COMPLIMENTARY":
+            complimentary_count += 1
+        # Support both {full_name, ...} and {first_name, last_name, ...} shapes
+        full_name = p_data.get("full_name", "")
+        first_name = p_data.get("first_name") or (full_name.split(" ")[0] if full_name else "")
+        last_name = p_data.get("last_name") or (" ".join(full_name.split(" ")[1:]) if " " in full_name else "")
+        p = Participant(
+            exhibitor_id=ex.id,
+            first_name=first_name,
+            last_name=last_name,
+            job_title=p_data.get("job_title", ""),
+            email=p_data.get("email", ""),
+            phone=p_data.get("phone", ""),
+            badge_type=badge,
+        )
+        db.add(p)
+    ex.participants_status = "UNDER_REVIEW"
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/me/exhibitor/graphics/{slot_key}/presign")
+def me_graphics_presign(
+    slot_key: str,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Convenience: presign graphic upload for current user's exhibitor."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if ex.section_graphics_locked:
+        raise HTTPException(403, "Graphics section locked")
+    s3_key = f"graphics/{ex.id}/{slot_key}/{slot_key}.tif"
+    url = storage.presign_put(s3_key, content_type="image/tiff", expires=3600)
+    return {"upload_url": url, "s3_key": s3_key}
+
+
+@router.post("/me/exhibitor/graphics/{slot_key}/finalize")
+def me_graphics_finalize(
+    slot_key: str,
+    body: Dict[str, Any],
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Convenience: finalize graphic upload for current user's exhibitor."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if ex.section_graphics_locked:
+        raise HTTPException(403, "Graphics section locked")
+    s3_key = body.get("s3_key", "")
+    original_filename = body.get("original_filename", "file.tif")
+    return _finalize_graphic_upload(db, ex, slot_key, s3_key, original_filename, user, request, background_tasks)
 
 
 @router.post("/exhibitors/{exhibitor_id}/manual")
