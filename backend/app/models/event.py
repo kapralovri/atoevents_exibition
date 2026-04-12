@@ -35,6 +35,13 @@ class Event(Base):
     # Low-res booth backdrop S3 keys per stand package (for preview composite)
     backdrop_s3_keys: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
+    # Event lifecycle status
+    status: Mapped[str] = mapped_column(String(32), default="upcoming")
+
+    # Available stand slot configuration per package
+    # {"SHELL_ONLY": {"enabled": true, "count": 10, "area_m2": 9}, ...}
+    stand_slots: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

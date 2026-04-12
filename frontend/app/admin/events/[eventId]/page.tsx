@@ -26,6 +26,9 @@ import {
   X,
   Building2,
   ChevronRight,
+  Copy,
+  Check,
+  KeyRound,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
@@ -67,11 +70,13 @@ export default function AdminEventDetailPage() {
   const [exhibitors, setExhibitors] = useState<Exhibitor[]>([]);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [copiedField, setCopiedField] = useState<"email" | "password" | null>(null);
   const [newExhibitor, setNewExhibitor] = useState({
     company_name: "",
     email: "",
-    booth_type: "shell_only",
-    booth_config: "linear",
+    booth_type: "SHELL_ONLY",
+    booth_config: "LINEAR",
     booth_size: 9,
   });
 
@@ -91,22 +96,35 @@ export default function AdminEventDetailPage() {
     fetchData();
   }, [eventId]);
 
+  const copyToClipboard = async (text: string, field: "email" | "password") => {
+    await navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
   const handleRegisterExhibitor = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsRegistering(true);
     try {
-      await apiFetch(`/admin/events/${eventId}/exhibitors`, {
+      const result = await apiFetch<{ exhibitor_id: number; user_id: number; temporary_password: string }>(`/admin/exhibitors`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newExhibitor),
+        body: JSON.stringify({
+          event_id: parseInt(eventId),
+          company_name: newExhibitor.company_name,
+          email: newExhibitor.email,
+          stand_package: newExhibitor.booth_type,
+          stand_configuration: newExhibitor.booth_config,
+          area_m2: newExhibitor.booth_size,
+        }),
       });
-      toast.success("Exhibitor registered successfully");
+      setCredentials({ email: newExhibitor.email, password: result.temporary_password });
       setShowRegisterForm(false);
       setNewExhibitor({
         company_name: "",
         email: "",
-        booth_type: "shell_only",
-        booth_config: "linear",
+        booth_type: "SHELL_ONLY",
+        booth_config: "LINEAR",
         booth_size: 9,
       });
       const data = await apiFetch<Exhibitor[]>(
@@ -326,9 +344,9 @@ export default function AdminEventDetailPage() {
                         }
                         className={SELECT_CLASSES}
                       >
-                        <option value="shell_only">Shell Only</option>
-                        <option value="system">System</option>
-                        <option value="bespoke">Bespoke</option>
+                        <option value="SHELL_ONLY">Shell Only</option>
+                        <option value="SYSTEM">System</option>
+                        <option value="BESPOKE">Bespoke</option>
                       </select>
                     </div>
                     <div className="space-y-1.5">
@@ -342,10 +360,10 @@ export default function AdminEventDetailPage() {
                         }
                         className={SELECT_CLASSES}
                       >
-                        <option value="linear">Linear</option>
-                        <option value="corner">Corner</option>
-                        <option value="peninsula">Peninsula</option>
-                        <option value="island">Island</option>
+                        <option value="LINEAR">Linear</option>
+                        <option value="ANGULAR">Angular</option>
+                        <option value="PENINSULA">Peninsula</option>
+                        <option value="ISLAND">Island</option>
                       </select>
                     </div>
                     <div className="space-y-1.5">
@@ -569,6 +587,153 @@ export default function AdminEventDetailPage() {
           </Card>
         </div>
       </main>
+
+      {/* ── Credentials modal ────────────────────────────────── */}
+      {credentials && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "hsl(209 65% 10% / 0.6)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl shadow-2xl animate-fade-up"
+            style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center justify-between px-6 py-5 rounded-t-2xl"
+              style={{ background: "hsl(209 65% 21%)" }}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="h-9 w-9 rounded-xl flex items-center justify-center"
+                  style={{ background: "hsl(154 100% 49% / 0.15)" }}
+                >
+                  <KeyRound className="h-5 w-5" style={{ color: "hsl(154 100% 49%)" }} />
+                </div>
+                <div>
+                  <p className="font-semibold text-white text-sm">Exhibitor Access Created</p>
+                  <p className="text-xs" style={{ color: "hsl(209 40% 75%)" }}>
+                    Save these credentials — password won&apos;t be shown again
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCredentials(null)}
+                className="h-7 w-7 rounded-lg flex items-center justify-center transition-colors"
+                style={{ color: "hsl(209 40% 70%)" }}
+                onMouseEnter={(e) =>
+                  ((e.currentTarget as HTMLElement).style.background = "hsl(209 65% 35%)")
+                }
+                onMouseLeave={(e) =>
+                  ((e.currentTarget as HTMLElement).style.background = "")
+                }
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Share these credentials with the exhibitor so they can log in at{" "}
+                <span className="font-mono text-xs font-semibold text-foreground">
+                  localhost:3000/login
+                </span>
+              </p>
+
+              {/* Email row */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Email
+                </p>
+                <div
+                  className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5"
+                  style={{ background: "hsl(213 25% 96%)", border: "1px solid hsl(var(--border))" }}
+                >
+                  <span className="font-mono text-sm truncate">{credentials.email}</span>
+                  <button
+                    onClick={() => copyToClipboard(credentials.email, "email")}
+                    className="shrink-0 h-7 w-7 rounded-md flex items-center justify-center transition-colors"
+                    style={{ color: "hsl(209 65% 38%)" }}
+                    onMouseEnter={(e) =>
+                      ((e.currentTarget as HTMLElement).style.background = "hsl(209 65% 21% / 0.08)")
+                    }
+                    onMouseLeave={(e) =>
+                      ((e.currentTarget as HTMLElement).style.background = "")
+                    }
+                    title="Copy email"
+                  >
+                    {copiedField === "email" ? (
+                      <Check className="h-3.5 w-3.5" style={{ color: "hsl(154 60% 35%)" }} />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Password row */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Temporary Password
+                </p>
+                <div
+                  className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5"
+                  style={{ background: "hsl(154 100% 49% / 0.06)", border: "1px solid hsl(154 100% 49% / 0.2)" }}
+                >
+                  <span className="font-mono text-sm font-semibold tracking-wider">
+                    {credentials.password}
+                  </span>
+                  <button
+                    onClick={() => copyToClipboard(credentials.password, "password")}
+                    className="shrink-0 h-7 w-7 rounded-md flex items-center justify-center transition-colors"
+                    style={{ color: "hsl(154 60% 35%)" }}
+                    onMouseEnter={(e) =>
+                      ((e.currentTarget as HTMLElement).style.background = "hsl(154 100% 49% / 0.1)")
+                    }
+                    onMouseLeave={(e) =>
+                      ((e.currentTarget as HTMLElement).style.background = "")
+                    }
+                    title="Copy password"
+                  >
+                    {copiedField === "password" ? (
+                      <Check className="h-3.5 w-3.5" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Warning */}
+              <div
+                className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs"
+                style={{
+                  background: "hsl(45 96% 50% / 0.08)",
+                  border: "1px solid hsl(45 96% 50% / 0.25)",
+                  color: "hsl(35 80% 35%)",
+                }}
+              >
+                <span className="shrink-0 mt-0.5">⚠</span>
+                <span>
+                  The exhibitor should change their password after first login.
+                  This dialog will not show the password again once closed.
+                </span>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="px-6 py-4 flex justify-end rounded-b-2xl"
+              style={{ borderTop: "1px solid hsl(var(--border))" }}
+            >
+              <Button onClick={() => setCredentials(null)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
