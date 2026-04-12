@@ -1,0 +1,224 @@
+@import "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;1,14..32,400&display=swap";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ─── ATO COMM Brand Palette ─────────────────────────────────── */
+    /* Navy  #133759 → hsl(209 65% 21%) */
+    /* Green #00fc90 → hsl(154 100% 49%) */
+    /* Yellow #effc00 → hsl(63 100% 49%) */
+
+    /* Surface */
+    --background: 213 25% 97%;
+    --foreground: 209 50% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 209 50% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 209 50% 12%;
+
+    /* Brand */
+    --primary: 209 65% 21%;          /* Navy #133759 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 213 20% 93%;
+    --secondary-foreground: 209 50% 18%;
+
+    --muted: 213 18% 91%;
+    --muted-foreground: 213 15% 48%;
+
+    --accent: 154 100% 49%;          /* Green #00fc90 */
+    --accent-foreground: 209 65% 12%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 213 20% 88%;
+    --input: 213 20% 88%;
+    --ring: 154 100% 49%;            /* Green focus ring */
+    --radius: 0.75rem;
+
+    /* Status */
+    --success: 154 60% 38%;          /* Darker green for light-bg text */
+    --success-bg: 154 80% 94%;
+    --warning: 45 96% 48%;
+    --warning-bg: 45 100% 94%;
+    --info: 209 65% 45%;
+    --info-bg: 209 65% 94%;
+
+    /* ─── Sidebar ─────────────────────────────────────────────────── */
+    --sidebar-background: 209 65% 21%;   /* Navy */
+    --sidebar-foreground: 210 50% 88%;   /* Light blue-white */
+    --sidebar-primary: 154 100% 49%;     /* Green */
+    --sidebar-accent: 209 70% 16%;       /* Darker navy */
+    --sidebar-border: 209 60% 16%;
+
+    /* ─── Gradients ───────────────────────────────────────────────── */
+    --gradient-brand: linear-gradient(135deg, hsl(209 65% 21%), hsl(209 65% 14%));
+    --gradient-green: linear-gradient(135deg, hsl(154 100% 49%), hsl(170 80% 44%));
+    --gradient-surface: linear-gradient(180deg, hsl(213 25% 97%), hsl(213 20% 95%));
+  }
+
+  .dark {
+    --background: 209 65% 9%;
+    --foreground: 210 50% 92%;
+    --card: 209 65% 13%;
+    --card-foreground: 210 50% 92%;
+    --popover: 209 65% 13%;
+    --popover-foreground: 210 50% 92%;
+    --primary: 154 100% 49%;
+    --primary-foreground: 209 65% 10%;
+    --secondary: 209 55% 17%;
+    --secondary-foreground: 210 50% 88%;
+    --muted: 209 55% 17%;
+    --muted-foreground: 210 25% 55%;
+    --accent: 154 100% 49%;
+    --accent-foreground: 209 65% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 209 50% 20%;
+    --input: 209 50% 20%;
+    --ring: 154 100% 49%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased min-h-screen;
+    font-family: "Inter", system-ui, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: hsl(var(--foreground));
+  }
+
+  /* ─── Custom scrollbar ─────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full;
+    background: hsl(var(--border));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
+}
+
+@layer utilities {
+  /* ─── Brand utilities ──────────────────────────────────────────── */
+  .text-brand-navy   { color: hsl(209 65% 21%); }
+  .text-brand-green  { color: hsl(154 100% 49%); }
+  .text-brand-yellow { color: hsl(63 100% 49%); }
+  .bg-brand-navy     { background-color: hsl(209 65% 21%); }
+  .bg-brand-green    { background-color: hsl(154 100% 49%); }
+
+  /* ─── Status pill utilities ────────────────────────────────────── */
+  .status-success {
+    @apply bg-[hsl(154_80%_94%)] text-[hsl(154_60%_28%)] border border-[hsl(154_60%_82%)];
+  }
+  .status-warning {
+    @apply bg-[hsl(45_100%_94%)] text-[hsl(45_80%_30%)] border border-[hsl(45_80%_82%)];
+  }
+  .status-destructive {
+    @apply bg-[hsl(0_80%_95%)] text-[hsl(0_72%_40%)] border border-[hsl(0_72%_85%)];
+  }
+  .status-info {
+    @apply bg-[hsl(209_65%_94%)] text-[hsl(209_65%_28%)] border border-[hsl(209_50%_82%)];
+  }
+  .status-muted {
+    @apply bg-muted text-muted-foreground border border-border;
+  }
+
+  /* ─── Page layout helpers ──────────────────────────────────────── */
+  .page-header {
+    @apply mb-6;
+  }
+  .page-title {
+    @apply text-2xl font-bold tracking-tight text-foreground;
+  }
+  .page-description {
+    @apply text-sm text-muted-foreground mt-1;
+  }
+
+  /* ─── Card elevation ───────────────────────────────────────────── */
+  .card-elevated {
+    box-shadow: 0 1px 3px 0 hsl(209 65% 21% / 0.08),
+                0 4px 16px 0 hsl(209 65% 21% / 0.06);
+  }
+  .card-hover {
+    @apply transition-all duration-200;
+  }
+  .card-hover:hover {
+    box-shadow: 0 4px 12px 0 hsl(209 65% 21% / 0.12),
+                0 8px 32px 0 hsl(209 65% 21% / 0.08);
+    transform: translateY(-1px);
+  }
+
+  /* ─── Green accent bar (top of stat cards) ─────────────────────── */
+  .card-accent-bar::before {
+    content: "";
+    display: block;
+    height: 3px;
+    background: hsl(154 100% 49%);
+    border-radius: var(--radius) var(--radius) 0 0;
+    margin: -1px -1px 0;
+  }
+}
+
+@layer components {
+  /* ─── Animations ───────────────────────────────────────────────── */
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes slide-in-left {
+    from { opacity: 0; transform: translateX(-16px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes progress-fill {
+    from { width: 0%; }
+    to   { width: var(--progress-width, 100%); }
+  }
+
+  .animate-fade-up   { animation: fade-up 0.3s ease-out both; }
+  .animate-fade-in   { animation: fade-in 0.25s ease-out both; }
+  .animate-slide-in  { animation: slide-in-left 0.3s ease-out both; }
+
+  /* Stagger delays for lists */
+  .stagger-1 { animation-delay: 50ms; }
+  .stagger-2 { animation-delay: 100ms; }
+  .stagger-3 { animation-delay: 150ms; }
+  .stagger-4 { animation-delay: 200ms; }
+
+  /* ─── Brand progress bar ───────────────────────────────────────── */
+  .progress-brand [data-radix-progress-indicator],
+  .progress-brand > div {
+    background: hsl(154 100% 49%) !important;
+  }
+
+  /* ─── Focus ring override (green) ─────────────────────────────── */
+  .focus-brand:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px hsl(154 100% 49% / 0.3);
+  }
+}
