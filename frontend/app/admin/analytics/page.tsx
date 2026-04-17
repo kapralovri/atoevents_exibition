@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -28,9 +27,9 @@ import {
   CheckCircle2,
   Clock,
   TrendingUp,
+  Filter,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { Sidebar } from "@/components/sidebar";
 
 interface Analytics {
   total_exhibitors: number;
@@ -39,6 +38,11 @@ interface Analytics {
   days_to_deadline: number;
   status_distribution: { name: string; value: number; color: string }[];
   graphics_status: { name: string; value: number }[];
+}
+
+interface EventOption {
+  id: string;
+  name: string;
 }
 
 /* ATO COMM-brand chart colors */
@@ -84,15 +88,24 @@ const CustomTooltip = ({
 };
 
 export default function AdminAnalyticsPage() {
-  const params = useParams();
-  const eventId = params.eventId as string | undefined;
+  const [events, setEvents] = useState<EventOption[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
 
+  // Load events list for the filter dropdown
   useEffect(() => {
+    apiFetch<{ id: string; name: string }[]>("/admin/events")
+      .then((data) => setEvents(data))
+      .catch(() => {});
+  }, []);
+
+  // Refetch analytics whenever the selected event changes
+  useEffect(() => {
+    setAnalytics(null);
     async function fetchAnalytics() {
       try {
-        const endpoint = eventId
-          ? `/admin/analytics/${eventId}`
+        const endpoint = selectedEventId
+          ? `/admin/analytics?event_id=${selectedEventId}`
           : "/admin/analytics";
         const data = await apiFetch<Analytics>(endpoint);
         setAnalytics(data);
@@ -101,29 +114,28 @@ export default function AdminAnalyticsPage() {
       }
     }
     fetchAnalytics();
-  }, [eventId]);
+  }, [selectedEventId]);
+
+  const selectedEvent = events.find((e) => e.id === selectedEventId);
 
   if (!analytics) {
     return (
-      <div className="flex h-screen" style={{ background: "hsl(213 25% 97%)" }}>
-        <Sidebar userRole="admin" />
-        <main className="flex-1 ml-64 overflow-auto flex items-center justify-center">
-          <div className="flex flex-col items-center gap-4">
-            <div
-              className="h-10 w-10 rounded-xl flex items-center justify-center font-black animate-pulse text-sm"
-              style={{ background: "hsl(209 65% 21%)", color: "hsl(154 100% 49%)" }}
-            >
-              A
-            </div>
-            <span
-              className="h-4 w-4 rounded-full border-2 border-t-transparent animate-spin"
-              style={{
-                borderColor: "hsl(209 65% 21% / 0.2)",
-                borderTopColor: "hsl(209 65% 21%)",
-              }}
-            />
+      <div className="flex h-full items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div
+            className="h-10 w-10 rounded-xl flex items-center justify-center font-black animate-pulse text-sm"
+            style={{ background: "hsl(209 65% 21%)", color: "hsl(154 100% 49%)" }}
+          >
+            A
           </div>
-        </main>
+          <span
+            className="h-4 w-4 rounded-full border-2 border-t-transparent animate-spin"
+            style={{
+              borderColor: "hsl(209 65% 21% / 0.2)",
+              borderTopColor: "hsl(209 65% 21%)",
+            }}
+          />
+        </div>
       </div>
     );
   }
@@ -170,17 +182,41 @@ export default function AdminAnalyticsPage() {
   ];
 
   return (
-    <div className="flex h-screen" style={{ background: "hsl(213 25% 97%)" }}>
-      <Sidebar userRole="admin" />
-      <main className="flex-1 ml-64 overflow-auto">
-        <div className="max-w-6xl mx-auto px-6 py-6 space-y-6 animate-fade-up">
+    <div className="max-w-6xl mx-auto px-6 py-6 space-y-6 animate-fade-up">
 
           {/* ── Header ───────────────────────────────────────────── */}
-          <div>
-            <h1 className="page-title">Analytics</h1>
-            <p className="page-description">
-              {eventId ? "Event performance metrics" : "Overall platform analytics"}
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+            <div>
+              <h1 className="page-title">Analytics</h1>
+              <p className="page-description">
+                {selectedEvent ? `Metrics for: ${selectedEvent.name}` : "Overall platform analytics"}
+              </p>
+            </div>
+
+            {/* Event filter */}
+            <div
+              className="flex items-center gap-2 rounded-xl px-3 py-2 shrink-0"
+              style={{
+                border: "1px solid hsl(209 65% 21% / 0.15)",
+                background: "hsl(209 65% 21% / 0.04)",
+                minWidth: "220px",
+              }}
+            >
+              <Filter className="h-3.5 w-3.5 shrink-0" style={{ color: "hsl(209 65% 38%)" }} />
+              <select
+                value={selectedEventId}
+                onChange={(e) => setSelectedEventId(e.target.value)}
+                className="flex-1 bg-transparent text-sm font-medium text-foreground focus:outline-none cursor-pointer"
+                style={{ color: selectedEventId ? "hsl(209 65% 21%)" : "hsl(213 15% 55%)" }}
+              >
+                <option value="">All Events</option>
+                {events.map((ev) => (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* ── KPI strip ────────────────────────────────────────── */}
@@ -314,7 +350,7 @@ export default function AdminAnalyticsPage() {
                 style={{ color: "hsl(209 65% 38%)" }}
               />
               <span className="text-sm font-semibold" style={{ color: "hsl(209 65% 21%)" }}>
-                Platform Summary
+                {selectedEvent ? selectedEvent.name : "Platform Summary"}
               </span>
             </div>
             <div className="flex flex-wrap gap-6 text-sm">
@@ -349,8 +385,6 @@ export default function AdminAnalyticsPage() {
               </span>
             </div>
           </div>
-        </div>
-      </main>
     </div>
   );
 }

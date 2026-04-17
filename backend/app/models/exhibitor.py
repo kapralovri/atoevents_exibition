@@ -18,6 +18,8 @@ class Exhibitor(Base):
     stand_package: Mapped[str] = mapped_column(String(32))  # SHELL_ONLY, SYSTEM, BESPOKE
     stand_configuration: Mapped[str] = mapped_column(String(32))  # LINEAR, ANGULAR, PENINSULA, ISLAND
     area_m2: Mapped[float] = mapped_column(Float)
+    # References an item id in events.stand_inventory; null for legacy exhibitors
+    stand_inventory_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     glass_panel_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

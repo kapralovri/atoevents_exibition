@@ -38,9 +38,13 @@ class Event(Base):
     # Event lifecycle status
     status: Mapped[str] = mapped_column(String(32), default="upcoming")
 
-    # Available stand slot configuration per package
+    # Available stand slot configuration per package (legacy — kept for backward compat)
     # {"SHELL_ONLY": {"enabled": true, "count": 10, "area_m2": 9}, ...}
     stand_slots: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+
+    # New inventory: list of stand configurations with counts
+    # [{"id": "so_9_lin", "package": "SHELL_ONLY", "area_m2": 9, "configuration": "LINEAR", "total": 5}, ...]
+    stand_inventory: Mapped[Optional[List[Any]]] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

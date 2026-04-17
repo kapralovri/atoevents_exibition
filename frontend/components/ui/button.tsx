@@ -6,10 +6,13 @@ import { cn } from "@/lib/utils";
 const buttonVariants = cva(
   [
     "inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-semibold",
-    "transition-all duration-200 focus-visible:outline-none focus-visible:ring-2",
+    // Enumerate exact properties — never transition:all (catches layout props, causes repaints)
+    "[transition:transform_160ms_cubic-bezier(0.23,1,0.32,1),background-color_160ms_cubic-bezier(0.23,1,0.32,1),box-shadow_160ms_cubic-bezier(0.23,1,0.32,1),opacity_160ms_cubic-bezier(0.23,1,0.32,1)]",
+    "focus-visible:outline-none focus-visible:ring-2",
     "focus-visible:ring-ring focus-visible:ring-offset-2",
     "disabled:pointer-events-none disabled:opacity-40",
-    "active:scale-[0.98]",
+    // Press: instant (100ms), release: 160ms (set by base transition)
+    "active:scale-[0.97] active:[transition-duration:100ms]",
   ].join(" "),
   {
     variants: {

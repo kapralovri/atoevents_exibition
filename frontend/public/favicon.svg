@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#0d1f2d"/>
+  <text x="4" y="22" font-family="system-ui,-apple-system,sans-serif" font-size="11" font-weight="300" letter-spacing="0.5" fill="#e8e8e8">ato</text>
+  <text x="19.5" y="22" font-family="system-ui,-apple-system,sans-serif" font-size="11" font-weight="300" letter-spacing="0.5" fill="#e8e8e8">c</text>
+  <line x1="19" y1="9" x2="22" y2="24" stroke="#00fc90" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

@@ -16,7 +16,6 @@ import {
   FileText,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { Sidebar } from "@/components/sidebar";
 
 interface AuditLog {
   id: string;
@@ -133,10 +132,7 @@ export default function AdminAuditLogPage() {
   }, [logs, searchQuery, actionFilter]);
 
   return (
-    <div className="flex h-screen" style={{ background: "hsl(213 25% 97%)" }}>
-      <Sidebar userRole="admin" />
-      <main className="flex-1 ml-64 overflow-auto">
-        <div className="max-w-6xl mx-auto px-6 py-6 space-y-6 animate-fade-up">
+    <div className="max-w-6xl mx-auto px-6 py-6 space-y-6 animate-fade-up">
 
           {/* ── Header ───────────────────────────────────────────── */}
           <div className="flex items-start justify-between">
@@ -323,8 +319,6 @@ export default function AdminAuditLogPage() {
               )}
             </CardContent>
           </Card>
-        </div>
-      </main>
     </div>
   );
 }

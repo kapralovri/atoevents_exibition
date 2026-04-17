@@ -10,9 +10,23 @@ from app.config import settings
 
 
 def _client():
+    """Internal client — uses Docker-internal endpoint (for direct API operations)."""
     return boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url,
+        aws_access_key_id=settings.s3_access_key,
+        aws_secret_access_key=settings.s3_secret_key,
+        region_name=settings.s3_region,
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+
+
+def _presign_client():
+    """Presign client — uses the public endpoint so generated URLs work in the browser."""
+    public = settings.s3_public_endpoint_url or settings.s3_endpoint_url
+    return boto3.client(
+        "s3",
+        endpoint_url=public,
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
         region_name=settings.s3_region,
@@ -29,14 +43,7 @@ def ensure_bucket() -> None:
 
 
 def presign_put(key: str, content_type: str, max_size: int | None = None) -> dict[str, str]:
-    c = _client()
-    params: dict = {
-        "Bucket": settings.s3_bucket,
-        "Key": key,
-        "ContentType": content_type,
-    }
-    if max_size:
-        params["ContentLength"] = max_size  # not always used in presign
+    c = _presign_client()
     url = c.generate_presigned_url(
         "put_object",
         Params={"Bucket": settings.s3_bucket, "Key": key, "ContentType": content_type},
@@ -56,7 +63,7 @@ def presign_multipart_create(key: str, content_type: str) -> str:
 
 
 def presign_multipart_part(key: str, upload_id: str, part_number: int) -> str:
-    c = _client()
+    c = _presign_client()
     return c.generate_presigned_url(
         "upload_part",
         Params={
@@ -102,6 +109,12 @@ def download_to_path(key: str, path: str) -> None:
             f.write(chunk)
 
 
+def download_bytes(key: str) -> bytes:
+    c = _client()
+    obj = c.get_object(Bucket=settings.s3_bucket, Key=key)
+    return obj["Body"].read()
+
+
 def upload_bytes(key: str, data: bytes, content_type: str) -> None:
     c = _client()
     c.put_object(Bucket=settings.s3_bucket, Key=key, Body=data, ContentType=content_type)
@@ -113,7 +126,7 @@ def head_object(key: str) -> dict:
 
 
 def presign_get(key: str) -> str:
-    c = _client()
+    c = _presign_client()
     return c.generate_presigned_url(
         "get_object",
         Params={"Bucket": settings.s3_bucket, "Key": key},

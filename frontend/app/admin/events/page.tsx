@@ -28,10 +28,11 @@ import {
   Image as ImageIcon,
   Upload,
   Check,
+  Settings,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
-import { Sidebar } from "@/components/sidebar";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -228,6 +229,7 @@ function pct(completed: number, total: number) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AdminEventsPage() {
+  const router = useRouter();
   const [events, setEvents] = useState<Event[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [form, setForm] = useState<NewEventForm>(blankForm());
@@ -310,7 +312,7 @@ export default function AdminEventsPage() {
 
     // Deadlines must be before start_date
     Object.keys(DEADLINE_OFFSETS).forEach((key) => {
-      const val = (form as Record<string, unknown>)[key] as string;
+      const val = (form as unknown as Record<string, string>)[key];
       if (val && val >= form.start_date)
         e[key] = "Deadline must be before start date";
     });
@@ -478,10 +480,7 @@ export default function AdminEventsPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-screen bg-background">
-      <Sidebar userRole="admin" />
-      <main className="flex-1 ml-64 overflow-auto">
-        <div className="max-w-6xl mx-auto p-6 space-y-6 animate-fade-up">
+    <div className="max-w-6xl mx-auto p-6 space-y-6 animate-fade-up">
 
           {/* ── Header ────────────────────────────────────────────── */}
           <div className="flex items-start justify-between">
@@ -664,7 +663,7 @@ export default function AdminEventsPage() {
                                   <Input
                                     id={key}
                                     type="date"
-                                    value={(form as Record<string, string>)[key]}
+                                    value={(form as unknown as Record<string, string>)[key]}
                                     onChange={(e) =>
                                       setForm({ ...form, [key]: e.target.value })
                                     }
@@ -945,42 +944,47 @@ export default function AdminEventsPage() {
               {events.map((event, i) => {
                 const progress = pct(event.completed_count, event.exhibitor_count);
                 return (
-                  <Link key={event.id} href={`/admin/events/${event.id}`}>
+                  <div
+                    key={event.id}
+                    className={[
+                      "group relative flex items-center gap-4 rounded-xl overflow-hidden",
+                      `stagger-${Math.min(i + 1, 4)} animate-fade-up`,
+                    ].join(" ")}
+                    style={{
+                      background: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      padding: "14px 16px",
+                      transition: "border-color 150ms cubic-bezier(0.23,1,0.32,1), box-shadow 150ms cubic-bezier(0.23,1,0.32,1)",
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.borderColor =
+                        "hsl(209 65% 21% / 0.25)";
+                      (e.currentTarget as HTMLElement).style.boxShadow =
+                        "0 2px 12px hsl(209 65% 21% / 0.08)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.borderColor = "";
+                      (e.currentTarget as HTMLElement).style.boxShadow = "";
+                    }}
+                  >
+                    {/* Left accent stripe */}
                     <div
-                      className={[
-                        "group relative flex items-center gap-4 rounded-xl cursor-pointer overflow-hidden",
-                        "transition-all duration-200",
-                        `stagger-${Math.min(i + 1, 4)} animate-fade-up`,
-                      ].join(" ")}
+                      className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full"
                       style={{
-                        background: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        padding: "14px 16px",
+                        background:
+                          progress === 100
+                            ? "linear-gradient(180deg, hsl(154 100% 49%), hsl(170 80% 44%))"
+                            : progress > 50
+                            ? "hsl(209 65% 50%)"
+                            : "hsl(209 65% 21% / 0.2)",
                       }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLElement).style.borderColor =
-                          "hsl(209 65% 21% / 0.25)";
-                        (e.currentTarget as HTMLElement).style.boxShadow =
-                          "0 2px 12px hsl(209 65% 21% / 0.08)";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.borderColor = "";
-                        (e.currentTarget as HTMLElement).style.boxShadow = "";
-                      }}
-                    >
-                      {/* Left accent stripe */}
-                      <div
-                        className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full"
-                        style={{
-                          background:
-                            progress === 100
-                              ? "linear-gradient(180deg, hsl(154 100% 49%), hsl(170 80% 44%))"
-                              : progress > 50
-                              ? "hsl(209 65% 50%)"
-                              : "hsl(209 65% 21% / 0.2)",
-                        }}
-                      />
+                    />
 
+                    {/* Clickable area → event detail */}
+                    <Link
+                      href={`/admin/events/${event.id}`}
+                      className="flex flex-1 min-w-0 items-center gap-4"
+                    >
                       {/* Event name + meta */}
                       <div className="flex-1 min-w-0 pl-3">
                         <p className="font-semibold text-sm text-foreground truncate">
@@ -1037,9 +1041,10 @@ export default function AdminEventsPage() {
                         </div>
                         <div className="h-1.5 rounded-full overflow-hidden bg-muted">
                           <div
-                            className="h-full rounded-full transition-all duration-500"
+                            className="h-full rounded-full"
                             style={{
                               width: `${progress}%`,
+                              transition: "width 500ms cubic-bezier(0.23,1,0.32,1)",
                               background:
                                 progress === 100
                                   ? "linear-gradient(90deg, hsl(154 100% 49%), hsl(170 80% 44%))"
@@ -1049,10 +1054,34 @@ export default function AdminEventsPage() {
                         </div>
                       </div>
 
-                      {/* Arrow */}
-                      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                  </Link>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
+                    </Link>
+
+                    {/* Settings button — outside the Link so it doesn't navigate to detail */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/admin/events/${event.id}/settings`);
+                      }}
+                      title="Event settings"
+                      className="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 active:scale-95"
+                      style={{
+                        background: "hsl(209 65% 21% / 0.06)",
+                        color: "hsl(209 65% 38%)",
+                        transition: "opacity 150ms ease, background-color 120ms cubic-bezier(0.23,1,0.32,1), transform 100ms cubic-bezier(0.23,1,0.32,1)",
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLElement).style.background = "hsl(209 65% 21% / 0.12)";
+                        (e.currentTarget as HTMLElement).style.color = "hsl(209 65% 21%)";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLElement).style.background = "hsl(209 65% 21% / 0.06)";
+                        (e.currentTarget as HTMLElement).style.color = "hsl(209 65% 38%)";
+                      }}
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -1082,8 +1111,6 @@ export default function AdminEventsPage() {
               </CardContent>
             </Card>
           )}
-        </div>
-      </main>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import tempfile
 from datetime import datetime, timezone
 from typing import Annotated, Any, Optional, List, Dict
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -36,8 +36,12 @@ from app.services import storage
 from app.services.audit_service import log_event
 from app.services.deadlines import refresh_exhibitor_locks
 from app.services.email_service import notify_admin_equipment, notify_admin_new_upload, send_email
-from app.services.graphics_validation import build_preview_jpeg_from_path, validate_tiff_from_path
-from app.services.stand_matrix import slots_for_exhibitor, slot_dict_for_api
+from app.services.graphics_validation import (
+    ALLOWED_EXTENSIONS,
+    build_preview_jpeg_from_path,
+    validate_graphic_from_path,
+)
+from app.services.stand_matrix import slots_for_exhibitor, slot_dict_for_api, get_overlay_zones
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 
@@ -56,6 +60,23 @@ def _event(db: Session, event_id: int) -> Event:
     if not ev:
         raise HTTPException(404, "Event not found")
     return ev
+
+
+def _resolve_backdrop_key(ev: Event, ex: "Exhibitor") -> "str | None":
+    """Return the S3 key for this exhibitor's backdrop.
+    Prefers inventory_id-based key; falls back to stand_package for legacy exhibitors.
+    """
+    keys: dict = ev.backdrop_s3_keys or {}
+    if not keys:
+        return None
+    # Preferred: inventory-item-keyed backdrop
+    if ex.stand_inventory_id and ex.stand_inventory_id in keys:
+        return keys[ex.stand_inventory_id]
+    # Legacy fallback: package-keyed backdrop
+    if ex.stand_package in keys:
+        return keys[ex.stand_package]
+    # Last resort: any available backdrop
+    return next(iter(keys.values()), None)
 
 
 @router.get("/me")
@@ -131,6 +152,24 @@ def me_exhibitor(user: Annotated[User, Depends(get_current_user)], db: Session =
     }
 
 
+def _graphic_status(raw: Optional[str]) -> str:
+    """Normalize DB/validation status to lowercase frontend tokens."""
+    if not raw:
+        return "not_uploaded"
+    mapping = {
+        "PENDING": "not_uploaded",
+        "NOT_UPLOADED": "not_uploaded",
+        "UPLOADED": "under_review",
+        "UNDER_REVIEW": "under_review",
+        "VALID": "approved",
+        "APPROVED": "approved",
+        "INVALID": "revision",
+        "REVISION_NEEDED": "revision",
+        "NEEDS_REVISION": "revision",
+    }
+    return mapping.get(raw.upper(), raw.lower())
+
+
 @router.get("/me/exhibitor/graphics")
 def me_exhibitor_graphics(user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     """Convenience endpoint: returns graphic slots for the current user's exhibitor."""
@@ -146,10 +185,16 @@ def me_exhibitor_graphics(user: Annotated[User, Depends(get_current_user)], db: 
     for slot in slots:
         upload = uploads.get(slot.key)
         result.append({
+            "id": slot.key,
             "name": slot.key,
             "label": slot.label,
             "required": slot.required,
-            "status": upload.validation_status if upload else "PENDING",
+            "status": _graphic_status(upload.validation_status if upload else None),
+            "file_name": upload.original_filename if upload else None,
+            "file_size": upload.size_bytes if upload else None,
+            "uploaded_at": upload.created_at.isoformat() if upload else None,
+            "version_number": None,
+            "admin_comment": ex.graphics_admin_comment if upload else None,
             "preview_url": storage.presign_get(upload.preview_s3_key) if (upload and upload.preview_s3_key) else None,
         })
     return result
@@ -250,9 +295,38 @@ def me_put_participants(
     return {"status": "ok"}
 
 
+@router.post("/me/exhibitor/logo/presign")
+def me_logo_presign(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Return a presigned PUT URL for uploading a company logo image."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if ex.section_company_locked or ex.company_status == "APPROVED":
+        raise HTTPException(403, "Company section locked")
+    s3_key = f"logos/{ex.id}/logo.png"
+    result = storage.presign_put(s3_key, content_type="image/png")
+    return {"upload_url": result["url"], "s3_key": s3_key}
+
+
+class _GraphicsPresignBody(BaseModel):
+    content_type: str = "image/tiff"
+
+
+def _graphics_upload_allowed(ex: "Exhibitor") -> None:
+    """Raise 403 if the exhibitor is not allowed to upload graphics right now."""
+    if ex.section_graphics_locked:
+        raise HTTPException(403, "Graphics section locked")
+    if ex.graphics_status in ("UNDER_REVIEW", "APPROVED"):
+        raise HTTPException(403, "Graphics are under review or approved — uploads locked")
+
+
 @router.post("/me/exhibitor/graphics/{slot_key}/presign")
 def me_graphics_presign(
     slot_key: str,
+    body: _GraphicsPresignBody,
     user: Annotated[User, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:
@@ -260,11 +334,12 @@ def me_graphics_presign(
     ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
     if not ex:
         raise HTTPException(404, "No exhibitor profile found")
-    if ex.section_graphics_locked:
-        raise HTTPException(403, "Graphics section locked")
+    _graphics_upload_allowed(ex)
+    # Use a unique key per upload to avoid caching issues
     s3_key = f"graphics/{ex.id}/{slot_key}/{slot_key}.tif"
-    url = storage.presign_put(s3_key, content_type="image/tiff", expires=3600)
-    return {"upload_url": url, "s3_key": s3_key}
+    ct = body.content_type or "application/octet-stream"
+    result = storage.presign_put(s3_key, content_type=ct)
+    return {"upload_url": result["url"], "s3_key": s3_key, "content_type": ct}
 
 
 @router.post("/me/exhibitor/graphics/{slot_key}/finalize")
@@ -280,8 +355,7 @@ def me_graphics_finalize(
     ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
     if not ex:
         raise HTTPException(404, "No exhibitor profile found")
-    if ex.section_graphics_locked:
-        raise HTTPException(403, "Graphics section locked")
+    _graphics_upload_allowed(ex)
     s3_key = body.get("s3_key", "")
     original_filename = body.get("original_filename", "file.tif")
     return _finalize_graphic_upload(db, ex, slot_key, s3_key, original_filename, user, request, background_tasks)
@@ -458,9 +532,16 @@ def _finalize_graphic_upload(
         storage.delete_object(s3_key)
         raise HTTPException(400, "Invalid slot")
 
-    with tempfile.NamedTemporaryFile(suffix=".tif", delete=True) as tmp:
+    # Determine file extension for temp file (preserve for validators)
+    import os as _os
+    src_ext = _os.path.splitext(original_filename)[1].lower() or ".tif"
+    if src_ext not in ALLOWED_EXTENSIONS:
+        src_ext = ".tif"
+    mime_type = "application/pdf" if src_ext == ".pdf" else "image/tiff"
+
+    with tempfile.NamedTemporaryFile(suffix=src_ext, delete=True) as tmp:
         storage.download_to_path(s3_key, tmp.name)
-        ok, msg, meta = validate_tiff_from_path(tmp.name, slot)
+        ok, msg, meta = validate_graphic_from_path(tmp.name, slot)
         if not ok:
             storage.delete_object(s3_key)
             raise HTTPException(400, msg)
@@ -489,7 +570,7 @@ def _finalize_graphic_upload(
         slot_key=slot_key,
         slot_label=slot.label,
         original_filename=original_filename,
-        mime_type="image/tiff",
+        mime_type=mime_type,
         size_bytes=size_bytes,
         s3_key=s3_key,
         preview_s3_key=preview_key,
@@ -498,7 +579,7 @@ def _finalize_graphic_upload(
         dpi_x=meta.get("dpi_x"),
         dpi_y=meta.get("dpi_y"),
         validation_status="VALID",
-        validation_message=None,
+        validation_message=msg if msg else None,
     )
     db.add(gu)
     ex.graphics_status = "UNDER_REVIEW"
@@ -571,16 +652,64 @@ def preview_assets(
 ) -> Dict[str, Any]:
     ex = _get_exhibitor(db, exhibitor_id, user)
     ev = _event(db, ex.event_id)
-    backdrop = None
-    if ev.backdrop_s3_keys and ex.stand_package in (ev.backdrop_s3_keys or {}):
-        backdrop = storage.presign_get(ev.backdrop_s3_keys[ex.stand_package])
-    elif ev.backdrop_s3_keys:
-        backdrop = storage.presign_get(list(ev.backdrop_s3_keys.values())[0])
+    _bk = _resolve_backdrop_key(ev, ex)
+    backdrop = storage.presign_get(_bk) if _bk else None
+    zones = get_overlay_zones(ex.stand_package, ex.stand_configuration)
     layers = []
     for u in db.query(GraphicUpload).filter(GraphicUpload.exhibitor_id == exhibitor_id).all():
         if u.preview_s3_key:
-            layers.append({"slot_key": u.slot_key, "url": storage.presign_get(u.preview_s3_key)})
+            layer: dict[str, Any] = {"slot_key": u.slot_key, "url": storage.presign_get(u.preview_s3_key)}
+            zone = zones.get(u.slot_key)
+            if zone:
+                layer["zone"] = {"x": zone[0], "y": zone[1], "w": zone[2], "h": zone[3]}
+            layers.append(layer)
     return {"backdrop_url": backdrop, "layers": layers}
+
+
+@router.get("/exhibitors/{exhibitor_id}/preview/render")
+def render_preview(
+    exhibitor_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+):
+    """Generate and return a server-composited stand preview JPEG."""
+    from fastapi.responses import Response as FastAPIResponse
+    from app.services.stand_composer import build_stand_composite
+
+    ex = _get_exhibitor(db, exhibitor_id, user)
+    ev = _event(db, ex.event_id)
+
+    # Find backdrop S3 key — prefers inventory_id key, falls back to stand_package
+    backdrop_key: str | None = _resolve_backdrop_key(ev, ex)
+
+    if not backdrop_key:
+        raise HTTPException(404, "No backdrop image configured for this stand type. Ask the organiser to upload one.")
+
+    # Collect uploaded graphic previews with zone coordinates
+    zones = get_overlay_zones(ex.stand_package, ex.stand_configuration)
+    uploads = db.query(GraphicUpload).filter(GraphicUpload.exhibitor_id == exhibitor_id).all()
+    layers = []
+    for u in uploads:
+        if not u.preview_s3_key:
+            continue
+        zone = zones.get(u.slot_key)
+        if zone:
+            layers.append({
+                "preview_s3_key": u.preview_s3_key,
+                "zone": {"x": zone[0], "y": zone[1], "w": zone[2], "h": zone[3]},
+            })
+
+    # If no uploaded layers, just return the backdrop itself
+    if not layers:
+        raw = storage.download_bytes(backdrop_key)
+        return FastAPIResponse(content=raw, media_type="image/jpeg")
+
+    jpeg_bytes = build_stand_composite(backdrop_key, layers)
+    return FastAPIResponse(
+        content=jpeg_bytes,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-cache", "Content-Disposition": "inline; filename=preview.jpg"},
+    )
 
 
 @router.post("/exhibitors/{exhibitor_id}/graphics/approve")
