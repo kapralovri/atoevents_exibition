@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -108,10 +108,12 @@ export default function AdminEventDetailPage() {
   const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
   const [copiedField, setCopiedField] = useState<"email" | "password" | null>(null);
   const [newExhibitor, setNewExhibitor] = useState({ company_name: "", email: "" });
+  // Monotonic counter for row keys — avoids Date.now()/Math.random() collisions on rapid clicks
+  const keyCounterRef = useRef(1);
+  const nextKey = () => keyCounterRef.current++;
   const [standRows, setStandRows] = useState<StandRow[]>([
-    { key: Date.now(), stand_inventory_id: "", is_custom: false, custom_config: "LINEAR", custom_area: 9 },
+    { key: 0, stand_inventory_id: "", is_custom: false, custom_config: "LINEAR", custom_area: 9 },
   ]);
-  const nextKey = () => Date.now() + Math.random();
 
   useEffect(() => {
     async function fetchData() {
@@ -126,7 +128,7 @@ export default function AdminEventDetailPage() {
         setInventory(invData);
         // Pre-select first available slot in stand rows
         if (invData.length > 0) {
-          setStandRows([{ key: Date.now(), stand_inventory_id: invData[0].id, is_custom: false, custom_config: "LINEAR", custom_area: 9 }]);
+          setStandRows([{ key: nextKey(), stand_inventory_id: invData[0].id, is_custom: false, custom_config: "LINEAR", custom_area: 9 }]);
         }
       } catch (error) {
         console.error("Failed to fetch data:", error);
@@ -160,44 +162,67 @@ export default function AdminEventDetailPage() {
     }
     setIsRegistering(true);
     try {
-      let lastResult: { temporary_password: string; overbooked?: boolean } | null = null;
-      let overbooked = false;
-      for (const row of validRows) {
-        const payload = row.is_custom
-          ? {
-              event_id: parseInt(eventId),
-              company_name: newExhibitor.company_name,
-              email: newExhibitor.email,
-              stand_package: "BESPOKE",
-              stand_configuration: row.custom_config,
-              area_m2: row.custom_area,
-            }
-          : {
-              event_id: parseInt(eventId),
-              company_name: newExhibitor.company_name,
-              email: newExhibitor.email,
-              stand_inventory_id: row.stand_inventory_id,
-            };
-        const result = await apiFetch<{ exhibitor_id: number; user_id: number; temporary_password: string; overbooked?: boolean }>(
-          `/admin/exhibitors`,
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }
+      type RegResult = { exhibitor_id: number; user_id: number; temporary_password: string; overbooked?: boolean };
+
+      // Fire all registrations in parallel; collect partial successes/failures
+      const settled = await Promise.allSettled(
+        validRows.map(row => {
+          const payload = row.is_custom
+            ? {
+                event_id: parseInt(eventId),
+                company_name: newExhibitor.company_name,
+                email: newExhibitor.email,
+                stand_package: "BESPOKE",
+                stand_configuration: row.custom_config,
+                area_m2: row.custom_area,
+              }
+            : {
+                event_id: parseInt(eventId),
+                company_name: newExhibitor.company_name,
+                email: newExhibitor.email,
+                stand_inventory_id: row.stand_inventory_id,
+              };
+          return apiFetch<RegResult>(
+            `/admin/exhibitors`,
+            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }
+          );
+        })
+      );
+
+      const succeeded: RegResult[] = [];
+      const failed: { index: number; message: string }[] = [];
+      settled.forEach((s, i) => {
+        if (s.status === "fulfilled") succeeded.push(s.value);
+        else failed.push({ index: i, message: s.reason instanceof Error ? s.reason.message : String(s.reason) });
+      });
+
+      const overbooked = succeeded.some(r => r.overbooked);
+
+      // Reporting — distinguish all-ok / partial / all-failed
+      if (succeeded.length === 0) {
+        toast.error(`Registration failed: ${failed[0]?.message ?? "unknown error"}`);
+      } else if (failed.length === 0) {
+        toast.success(
+          overbooked
+            ? `${succeeded.length} stand(s) registered — some slots overbooked`
+            : `${succeeded.length} stand(s) registered`
         );
-        lastResult = result;
-        if (result.overbooked) overbooked = true;
-      }
-
-      if (overbooked) {
-        toast.warning(`${validRows.length} stand(s) registered — some slots overbooked`);
       } else {
-        toast.success(`${validRows.length} stand(s) registered`);
+        toast.warning(
+          `${succeeded.length}/${validRows.length} stand(s) registered · ${failed.length} failed: ${failed[0].message}`
+        );
       }
 
-      if (lastResult) {
-        setCredentials({ email: newExhibitor.email, password: lastResult.temporary_password });
+      // Show credentials once, using the first successful result
+      if (succeeded.length > 0) {
+        setCredentials({ email: newExhibitor.email, password: succeeded[0].temporary_password });
       }
-      setShowRegisterForm(false);
-      setNewExhibitor({ company_name: "", email: "" });
-      setStandRows([{ key: nextKey(), stand_inventory_id: inventory[0]?.id ?? "", is_custom: false, custom_config: "LINEAR", custom_area: 9 }]);
+
+      if (failed.length === 0) {
+        setShowRegisterForm(false);
+        setNewExhibitor({ company_name: "", email: "" });
+        setStandRows([{ key: nextKey(), stand_inventory_id: inventory[0]?.id ?? "", is_custom: false, custom_config: "LINEAR", custom_area: 9 }]);
+      }
 
       const [data, invData] = await Promise.all([
         apiFetch<Exhibitor[]>(`/admin/events/${eventId}/exhibitors`),

@@ -125,12 +125,12 @@ def head_object(key: str) -> dict:
     return c.head_object(Bucket=settings.s3_bucket, Key=key)
 
 
-def presign_get(key: str) -> str:
+def presign_get(key: str, expires_in: int = 3600) -> str:
     c = _presign_client()
     return c.generate_presigned_url(
         "get_object",
         Params={"Bucket": settings.s3_bucket, "Key": key},
-        ExpiresIn=3600,
+        ExpiresIn=expires_in,
     )
 
 

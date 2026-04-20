@@ -436,8 +436,20 @@ def complete_backdrop(body: BackdropCompleteBody, db: Session = Depends(get_db))
 # ── Exhibitor endpoints ───────────────────────────────────────────────────────
 
 @router.post("/exhibitors", dependencies=[Depends(require_admin)])
-def create_exhibitor(body: ExhibitorCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    ev = db.query(Event).filter(Event.id == body.event_id).first()
+def create_exhibitor(
+    body: ExhibitorCreate,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    # ── Lock event row to serialize overbooking checks against concurrent writers ──
+    ev = (
+        db.query(Event)
+        .filter(Event.id == body.event_id)
+        .with_for_update()
+        .first()
+    )
     if not ev:
         raise HTTPException(404, "Event not found")
 
@@ -453,7 +465,7 @@ def create_exhibitor(body: ExhibitorCreate, background_tasks: BackgroundTasks, d
         stand_package = item["package"]
         stand_configuration = item["configuration"]
         area_m2 = float(item["area_m2"])
-        # Overbooking check
+        # Overbooking check — safe under FOR UPDATE on the event row above
         booked_count: int = (
             db.query(func.count(Exhibitor.id))
             .filter(
@@ -499,9 +511,25 @@ def create_exhibitor(body: ExhibitorCreate, background_tasks: BackgroundTasks, d
     )
     db.add(ex)
     db.flush()
-    cp = CompanyProfile(exhibitor_id=ex.id, company_name=body.company_name, website="https://", description="")
+    cp = CompanyProfile(exhibitor_id=ex.id, company_name=body.company_name, website="", description="")
     db.add(cp)
     db.commit()
+    log_event(
+        db,
+        user_id=admin.id,
+        event_type="admin_create_exhibitor",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        payload={
+            "exhibitor_id": ex.id,
+            "event_id": body.event_id,
+            "stand_inventory_id": body.stand_inventory_id,
+            "stand_package": stand_package,
+            "area_m2": area_m2,
+            "overbooked": is_overbooked,
+            "is_new_user": is_new_user,
+        },
+    )
     if is_new_user and pwd:
         login_url = "http://localhost:3000/login"
         text, html = render_welcome_exhibitor(login_url, str(body.email), pwd)
@@ -526,12 +554,14 @@ def get_exhibitor(exhibitor_id: int, db: Session = Depends(get_db)) -> Dict[str,
         raise HTTPException(404, "Exhibitor not found")
     u = db.query(User).filter(User.id == ex.user_id).first()
     graphics = db.query(GraphicUpload).filter(GraphicUpload.exhibitor_id == exhibitor_id).all()
+    sp = ex.stand_package or ""
+    sc = ex.stand_configuration or ""
     return {
         "id": ex.id,
         "company_name": ex.company_name,
         "email": u.email if u else "",
-        "booth_type": ex.stand_package.lower().replace("_", " "),
-        "booth_config": ex.stand_configuration.lower(),
+        "booth_type": sp.lower().replace("_", " ") if sp else "",
+        "booth_config": sc.lower() if sc else "",
         "booth_size": ex.area_m2,
         "stand_package": ex.stand_package,
         "stand_configuration": ex.stand_configuration,
@@ -547,7 +577,8 @@ def get_exhibitor(exhibitor_id: int, db: Session = Depends(get_db)) -> Dict[str,
         "stand_inventory_id": ex.stand_inventory_id,
         "company_description": ex.company_profile.description if ex.company_profile else "",
         "website": ex.company_profile.website if ex.company_profile else "",
-        "logo_url": storage.presign_get(ex.company_profile.logo_s3_key)
+        # Short TTL (5 min): admin preview only, discourages link sharing
+        "logo_url": storage.presign_get(ex.company_profile.logo_s3_key, expires_in=300)
             if (ex.company_profile and ex.company_profile.logo_s3_key) else None,
         "participants": [
             {
@@ -578,13 +609,22 @@ def get_exhibitor(exhibitor_id: int, db: Session = Depends(get_db)) -> Dict[str,
 
 
 @router.patch("/exhibitors/{exhibitor_id}", dependencies=[Depends(require_admin)])
-def update_exhibitor(exhibitor_id: int, body: ExhibitorUpdate, db: Session = Depends(get_db)) -> Dict[str, str]:
+def update_exhibitor(
+    exhibitor_id: int,
+    body: ExhibitorUpdate,
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
     """Update stand configuration and/or company name for a registered exhibitor."""
     ex = db.query(Exhibitor).filter(Exhibitor.id == exhibitor_id).first()
     if not ex:
         raise HTTPException(404, "Exhibitor not found")
 
+    changes: Dict[str, Any] = {}
+
     if body.company_name is not None:
+        changes["company_name"] = {"from": ex.company_name, "to": body.company_name}
         ex.company_name = body.company_name
         if ex.company_profile:
             ex.company_profile.company_name = body.company_name
@@ -594,21 +634,48 @@ def update_exhibitor(exhibitor_id: int, body: ExhibitorUpdate, db: Session = Dep
         item = next((i for i in (ev.stand_inventory or []) if i["id"] == body.stand_inventory_id), None)
         if item is None:
             raise HTTPException(400, f"Stand inventory item '{body.stand_inventory_id}' not found for this event")
+        changes["stand"] = {
+            "mode": "inventory",
+            "inventory_id": body.stand_inventory_id,
+            "package": item["package"],
+            "configuration": item["configuration"],
+            "area_m2": float(item["area_m2"]),
+        }
         ex.stand_inventory_id = body.stand_inventory_id
         ex.stand_package = item["package"]
         ex.stand_configuration = item["configuration"]
         ex.area_m2 = float(item["area_m2"])
     else:
-        # Allow manual overrides for flat fields (e.g. BESPOKE custom)
-        if body.stand_package is not None:
-            ex.stand_package = body.stand_package
+        # Flat fields for custom/BESPOKE — must be atomic (all-or-nothing)
+        flat_given = [body.stand_package, body.stand_configuration, body.area_m2]
+        any_given = any(x is not None for x in flat_given)
+        all_given = all(x is not None for x in flat_given)
+        if any_given and not all_given:
+            raise HTTPException(
+                400,
+                "Custom stand override requires stand_package + stand_configuration + area_m2 together",
+            )
+        if all_given:
+            changes["stand"] = {
+                "mode": "custom",
+                "package": body.stand_package,
+                "configuration": body.stand_configuration,
+                "area_m2": body.area_m2,
+            }
             ex.stand_inventory_id = None  # detach from inventory
-        if body.stand_configuration is not None:
+            ex.stand_package = body.stand_package
             ex.stand_configuration = body.stand_configuration
-        if body.area_m2 is not None:
             ex.area_m2 = body.area_m2
 
     db.commit()
+    log_event(
+        db,
+        user_id=admin.id,
+        event_type="admin_update_exhibitor",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        payload={"exhibitor_id": exhibitor_id, "changes": changes},
+    )
     return {"status": "ok"}
 
 

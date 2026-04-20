@@ -311,8 +311,21 @@ def me_logo_presign(
     return {"upload_url": result["url"], "s3_key": s3_key}
 
 
+_ALLOWED_GRAPHICS_MIME = {
+    "image/tiff", "image/x-tiff",
+    "image/png",
+    "image/jpeg",
+    "application/pdf",
+    "application/octet-stream",  # browsers sometimes report this for TIFF
+}
+
+
 class _GraphicsPresignBody(BaseModel):
     content_type: str = "image/tiff"
+
+    @classmethod
+    def _normalize(cls, v: str) -> str:
+        return (v or "").strip().lower() or "application/octet-stream"
 
 
 def _graphics_upload_allowed(ex: "Exhibitor") -> None:
@@ -337,7 +350,9 @@ def me_graphics_presign(
     _graphics_upload_allowed(ex)
     # Use a unique key per upload to avoid caching issues
     s3_key = f"graphics/{ex.id}/{slot_key}/{slot_key}.tif"
-    ct = body.content_type or "application/octet-stream"
+    ct = _GraphicsPresignBody._normalize(body.content_type)
+    if ct not in _ALLOWED_GRAPHICS_MIME:
+        raise HTTPException(400, f"Unsupported content type: {ct}")
     result = storage.presign_put(s3_key, content_type=ct)
     return {"upload_url": result["url"], "s3_key": s3_key, "content_type": ct}
 
