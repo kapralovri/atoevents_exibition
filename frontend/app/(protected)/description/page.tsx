@@ -398,8 +398,8 @@ export default function DescriptionPage() {
                 className="h-20 w-20 rounded-xl overflow-hidden flex items-center justify-center shrink-0"
                 style={{ background: "hsl(209 65% 21% / 0.1)", border: "1px solid hsl(209 65% 28% / 0.2)" }}
               >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 {logoUrl ? (
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={logoUrl} alt="Company logo" className="h-full w-full object-contain p-1" />
                 ) : (
                   <ImagePlus className="h-8 w-8" style={{ color: "hsl(209 65% 38%)" }} />
