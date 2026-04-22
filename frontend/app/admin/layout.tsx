@@ -62,7 +62,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const sidebarW = collapsed ? "ml-16" : "ml-64";
 
   return (
-    <div className="flex h-screen" style={{ background: "hsl(213 25% 97%)" }}>
+    <div className="flex h-screen" style={{ background: "hsl(210 25% 98%)" }}>
       <Sidebar
         userRole="admin"
         userEmail={userEmail}

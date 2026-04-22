@@ -34,6 +34,12 @@ class Exhibitor(Base):
     graphics_admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     company_admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Final stand visualization PDF attached by admin after graphics review.
+    # The exhibitor sees this document inline before digitally signing.
+    final_stand_pdf_s3_key: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    final_stand_pdf_filename: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    final_stand_pdf_uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     section_graphics_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     section_company_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     section_participants_locked: Mapped[bool] = mapped_column(Boolean, default=False)

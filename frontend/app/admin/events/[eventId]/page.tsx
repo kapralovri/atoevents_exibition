@@ -33,6 +33,12 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
+import {
+  GlassCard,
+  StatusChip,
+  brandHsl,
+  initialsOf,
+} from "@/components/glass";
 
 interface Event {
   id: string;
@@ -105,7 +111,7 @@ export default function AdminEventDetailPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
-  const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [credentials, setCredentials] = useState<{ email: string; password: string | null; isNewUser: boolean } | null>(null);
   const [copiedField, setCopiedField] = useState<"email" | "password" | null>(null);
   const [newExhibitor, setNewExhibitor] = useState({ company_name: "", email: "" });
   // Monotonic counter for row keys — avoids Date.now()/Math.random() collisions on rapid clicks
@@ -162,7 +168,7 @@ export default function AdminEventDetailPage() {
     }
     setIsRegistering(true);
     try {
-      type RegResult = { exhibitor_id: number; user_id: number; temporary_password: string; overbooked?: boolean };
+      type RegResult = { exhibitor_id: number; user_id: number; temporary_password: string | null; is_new_user: boolean; overbooked?: boolean };
 
       // Fire all registrations in parallel; collect partial successes/failures
       const settled = await Promise.allSettled(
@@ -215,7 +221,11 @@ export default function AdminEventDetailPage() {
 
       // Show credentials once, using the first successful result
       if (succeeded.length > 0) {
-        setCredentials({ email: newExhibitor.email, password: succeeded[0].temporary_password });
+        setCredentials({
+          email: newExhibitor.email,
+          password: succeeded[0].temporary_password,
+          isNewUser: succeeded[0].is_new_user,
+        });
       }
 
       if (failed.length === 0) {
@@ -322,12 +332,22 @@ export default function AdminEventDetailPage() {
     {}
   );
 
-  return (
-    <div className="max-w-6xl mx-auto px-6 py-6 space-y-6 animate-fade-up">
+  // Urgency-by-readiness count for hero
+  const exhibitorsReady = exhibitors.filter(
+    (e) => e.overall_status === "approved" || e.overall_status === "locked"
+  ).length;
+  const readinessPct = exhibitors.length
+    ? Math.round((exhibitorsReady / exhibitors.length) * 100)
+    : 0;
+  const eventDateObj: Date | null = event.date ? new Date(event.date) : null;
+  const yearStr = eventDateObj ? String(eventDateObj.getFullYear()) : "";
 
-      {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-6 space-y-6 animate-fade-up">
+
+      {/* ── Header (matches exhibitor detail pattern) ──────────── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start gap-3 min-w-0">
           <button
             onClick={() => router.back()}
             className="mt-1 h-8 w-8 rounded-lg flex items-center justify-center transition-colors shrink-0"
@@ -340,35 +360,45 @@ export default function AdminEventDetailPage() {
               (e.currentTarget as HTMLElement).style.background = "";
               (e.currentTarget as HTMLElement).style.color = "";
             }}
+            aria-label="Back to events"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <div>
-            <h1 className="page-title">{event.name}</h1>
+          <div className="min-w-0">
+            <h1 className="page-title">
+              {event.name}
+              {yearStr && (
+                <span className="text-[hsl(168_55%_38%)]"> {yearStr}</span>
+              )}
+            </h1>
             <div className="flex flex-wrap items-center gap-3 mt-1.5">
+              <StatusChip
+                tone={event.status === "active" ? "live" : "info"}
+                dot
+                pulse={event.status === "active"}
+              >
+                {event.status === "active" ? "Active" : event.status}
+              </StatusChip>
               {event.location && (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <MapPin className="h-3 w-3" />
                   {event.location}
                 </span>
               )}
-              {event.date && (
+              {eventDateObj && (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Calendar className="h-3 w-3" />
-                  {new Date(event.date).toLocaleDateString("en-GB", {
-                    day: "numeric", month: "short", year: "numeric",
-                  })}
+                  {eventDateObj.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                 </span>
               )}
               <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Users className="h-3 w-3" />
                 {exhibitors.length} exhibitors
               </span>
-              <StatusBadge status={event.status} />
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <Button
             variant="outline"
             size="sm"
@@ -378,7 +408,12 @@ export default function AdminEventDetailPage() {
             <Settings className="h-3.5 w-3.5" />
             Settings
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExportParticipants} className="gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleExportParticipants}
+          >
             <Download className="h-3.5 w-3.5" />
             Export
           </Button>
@@ -387,13 +422,51 @@ export default function AdminEventDetailPage() {
             className="gap-2"
             onClick={() => setShowRegisterForm(!showRegisterForm)}
           >
-            {showRegisterForm ? (
-              <><X className="h-3.5 w-3.5" />Cancel</>
-            ) : (
-              <><Plus className="h-3.5 w-3.5" />Register Exhibitor</>
-            )}
+            {showRegisterForm ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+            {showRegisterForm ? "Cancel" : "Register Exhibitor"}
           </Button>
         </div>
+      </div>
+
+      {/* ── Event meta KPIs (same pattern as exhibitor booth meta) ── */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card className="card-elevated">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <BarChart3 className="h-3.5 w-3.5" />
+              Readiness
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-base font-bold" style={{ color: "hsl(168 55% 32%)" }}>
+              {readinessPct}%
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="card-elevated">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <Users className="h-3.5 w-3.5" />
+              Exhibitors
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-base font-bold">{exhibitors.length}</p>
+          </CardContent>
+        </Card>
+        <Card className="card-elevated">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5" />
+              Event date
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-base font-bold">
+              {eventDateObj ? eventDateObj.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* ── Register form ────────────────────────────────────── */}
@@ -605,40 +678,29 @@ export default function AdminEventDetailPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         {deadlines.map(({ label, key }) => {
           const info = getDeadlineInfo(key);
+          const dateStr = key
+            ? new Date(key).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+            : "—";
+          const valueColor = !key
+            ? "hsl(215 15% 55%)"
+            : info.urgent && info.label === "Expired"
+            ? "hsl(0 65% 46%)"
+            : info.urgent
+            ? "hsl(32 70% 38%)"
+            : "hsl(168 55% 32%)";
           return (
-            <Card key={label} className="card-elevated relative overflow-hidden">
-              <div
-                className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl"
-                style={{
-                  background: info.urgent
-                    ? "hsl(0 72% 51%)"
-                    : key
-                    ? "linear-gradient(90deg, hsl(154 100% 49%), hsl(170 80% 44%))"
-                    : "hsl(213 20% 85%)",
-                }}
-              />
-              <CardHeader className="pb-1 pt-5">
+            <Card key={label} className="card-elevated">
+              <CardHeader className="pb-2 pt-4">
                 <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-                  <Clock className="h-3 w-3" />
+                  <Clock className="h-3.5 w-3.5" />
                   {label} Deadline
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p
-                  className="text-2xl font-bold tabular-nums"
-                  style={{ color: info.color }}
-                >
+                <p className="text-base font-bold" style={{ color: valueColor }}>
                   {info.label}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {key
-                    ? new Date(key).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })
-                    : "—"}
-                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">{dateStr}</p>
               </CardContent>
             </Card>
           );
@@ -648,10 +710,12 @@ export default function AdminEventDetailPage() {
       {/* ── Inventory analytics bar ──────────────────────────── */}
       {inventory.length > 0 && (
         <div>
-          <div className="flex items-center gap-2 mb-3">
-            <BarChart3 className="h-4 w-4" style={{ color: "hsl(209 65% 38%)" }} />
-            <h2 className="text-sm font-semibold">Stand Availability</h2>
-            <span className="text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 mb-3 flex-wrap min-w-0">
+            <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <h2 className="text-sm font-semibold tracking-tight text-[hsl(209_65%_21%)]">
+              Stand Availability
+            </h2>
+            <span className="text-xs text-muted-foreground min-w-0 truncate">
               · {inventory.reduce((s, i) => s + i.booked, 0)} of{" "}
               {inventory.reduce((s, i) => s + i.total, 0)} total booked
             </span>
@@ -661,54 +725,54 @@ export default function AdminEventDetailPage() {
               const pct = item.total > 0
                 ? Math.min(100, Math.round((item.booked / item.total) * 100))
                 : 0;
-              const barColor = item.is_full
-                ? "hsl(0 72% 51%)"
+              const barBg = item.is_full
+                ? "linear-gradient(90deg,hsl(0 65% 55%),hsl(10 65% 52%))"
                 : pct >= 80
-                ? "hsl(45 96% 48%)"
-                : "hsl(154 100% 38%)";
+                ? "linear-gradient(90deg,hsl(38 80% 55%),hsl(28 80% 52%))"
+                : "linear-gradient(90deg,hsl(168 55% 45%),hsl(190 50% 50%))";
 
               return (
-                <div
+                <GlassCard
                   key={item.id}
-                  className="card-elevated rounded-xl p-3 space-y-2"
-                  style={{ border: item.is_full ? "1px solid hsl(0 72% 51% / 0.3)" : undefined }}
+                  className="p-4 space-y-2.5 min-w-0"
+                  style={{
+                    boxShadow: item.is_full
+                      ? "0 0 0 1px hsl(0 65% 55% / 0.25), 0 4px 12px hsl(0 65% 55% / 0.08)"
+                      : undefined,
+                  }}
                 >
-                  <div className="flex items-start justify-between gap-1">
-                    <p className="text-xs font-semibold leading-tight">
-                      {pkgLabel(item.package)}
-                      <br />
-                      <span className="font-normal text-muted-foreground">
-                        {item.area_m2}m² · {capitalize(item.configuration)}
-                      </span>
-                    </p>
-                    {item.is_full && (
-                      <span
-                        className="shrink-0 text-[9px] font-bold uppercase rounded px-1 py-0.5"
-                        style={{ background: "hsl(0 72% 51% / 0.1)", color: "hsl(0 72% 45%)" }}
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="min-w-0">
+                      <p
+                        className="text-sm font-extrabold tracking-tight text-[hsl(209_65%_21%)] truncate"
+                        style={{ fontFamily: "var(--font-display), Manrope, system-ui, sans-serif" }}
                       >
-                        Full
-                      </span>
-                    )}
+                        {pkgLabel(item.package)}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {item.area_m2}m² · {capitalize(item.configuration)}
+                      </p>
+                    </div>
+                    {item.is_full && <StatusChip tone="danger">Full</StatusChip>}
                   </div>
-                  {/* Progress bar */}
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(213 20% 88%)" }}>
+                  <div className="h-1.5 rounded-full overflow-hidden bg-white/70">
                     <div
                       className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, background: barColor }}
+                      style={{ width: `${pct}%`, background: barBg }}
                     />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] tabular-nums text-muted-foreground">
+                    <span className="text-[11px] tabular-nums text-slate-500">
                       {item.booked}/{item.total}
                     </span>
                     <span
-                      className="text-[11px] font-semibold tabular-nums"
-                      style={{ color: barColor }}
+                      className="text-[11px] font-extrabold tabular-nums"
+                      style={{ color: item.is_full ? "hsl(0 72% 48%)" : pct >= 80 ? "hsl(30 85% 36%)" : "hsl(154 70% 28%)" }}
                     >
                       {pct}%
                     </span>
                   </div>
-                </div>
+                </GlassCard>
               );
             })}
           </div>
@@ -716,35 +780,27 @@ export default function AdminEventDetailPage() {
       )}
 
       {/* ── Exhibitors table ─────────────────────────────────── */}
-      <Card className="card-elevated">
-        <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-4 w-4" style={{ color: "hsl(209 65% 38%)" }} />
+      <GlassCard className="overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <h2 className="text-sm font-semibold tracking-tight text-[hsl(209_65%_21%)] truncate">
               Exhibitors
-            </CardTitle>
-            <span
-              className="text-xs font-semibold rounded-full px-2.5 py-1"
-              style={{
-                background: "hsl(209 65% 21% / 0.07)",
-                color: "hsl(209 65% 28%)",
-              }}
-            >
-              {exhibitors.length} registered
-            </span>
+            </h2>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
+          <StatusChip tone="info">{exhibitors.length} registered</StatusChip>
+        </div>
+        <div className="p-0">
           {exhibitors.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[720px]">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid hsl(var(--border))" }}>
+                  <tr className="border-b border-slate-100 bg-slate-50/50">
                     {["Company", "Stand", "Graphics", "Description", "Participants", "Overall", ""].map(
                       (h) => (
                         <th
                           key={h}
-                          className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                          className="text-left px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500"
                         >
                           {h}
                         </th>
@@ -763,61 +819,56 @@ export default function AdminEventDetailPage() {
                       : ex.booth_type
                       ? `${ex.booth_type.replace("_", " ")} ${ex.booth_size ?? ""}m²`
                       : "—";
-
+                    const tileHsl = brandHsl(ex.company_name || ex.email || ex.id, 70, 44);
+                    const tileHsl2 = brandHsl((ex.company_name || "").split("").reverse().join("") || ex.id, 70, 38);
                     return (
                       <tr
                         key={ex.id}
-                        className="transition-colors"
-                        style={{ borderBottom: "1px solid hsl(var(--border))" }}
-                        onMouseEnter={(e) => {
-                          (e.currentTarget as HTMLElement).style.background =
-                            "hsl(209 65% 21% / 0.03)";
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLElement).style.background = "";
-                        }}
+                        className="transition-colors border-b border-slate-100 cursor-pointer hover:bg-slate-50"
+                        onClick={() => router.push(`/admin/exhibitors/${ex.id}`)}
                       >
-                        <td className="px-4 py-3">
-                          <Link
-                            href={`/admin/exhibitors/${ex.id}`}
-                            className="group flex items-center gap-1.5 font-semibold text-foreground hover:text-[hsl(209_65%_28%)] transition-colors"
-                          >
-                            {ex.company_name}
-                            <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </Link>
-                          <p className="text-xs text-muted-foreground mt-0.5">{ex.email}</p>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div
+                              className="tile shrink-0"
+                              style={{
+                                width: 36,
+                                height: 36,
+                                fontSize: 12,
+                                background: `linear-gradient(135deg, hsl(${tileHsl}), hsl(${tileHsl2}))`,
+                              }}
+                            >
+                              {initialsOf(ex.company_name || ex.email)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-[hsl(209_65%_21%)] truncate">
+                                {ex.company_name}
+                              </p>
+                              <p className="text-[11px] text-slate-500 truncate">{ex.email}</p>
+                            </div>
+                          </div>
                         </td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-sm">{standLabel}</p>
+                        <td className="px-5 py-3">
+                          <p className="font-semibold text-sm text-[hsl(209_65%_21%)]">{standLabel}</p>
                           {ex.stand_inventory_id && (
-                            <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                              {ex.stand_inventory_id}
+                            <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate max-w-[12ch]">
+                              {ex.stand_inventory_id.slice(0, 8)}…
                             </p>
                           )}
                         </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={ex.graphics_status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={ex.description_status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={ex.participants_status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={ex.overall_status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          {ex.overall_status === "locked" && (
+                        <td className="px-5 py-3"><StatusBadge status={ex.graphics_status} /></td>
+                        <td className="px-5 py-3"><StatusBadge status={ex.description_status} /></td>
+                        <td className="px-5 py-3"><StatusBadge status={ex.participants_status} /></td>
+                        <td className="px-5 py-3"><StatusBadge status={ex.overall_status} /></td>
+                        <td className="px-5 py-3 text-right">
+                          {ex.overall_status === "locked" ? (
                             <button
-                              onClick={() => handleUnlockExhibitor(ex.id)}
-                              className="h-7 w-7 rounded-lg flex items-center justify-center transition-colors"
+                              onClick={(e) => { e.stopPropagation(); handleUnlockExhibitor(ex.id); }}
+                              className="h-7 w-7 rounded-lg flex items-center justify-center transition-colors ml-auto"
                               style={{ color: "hsl(213 15% 60%)" }}
                               onMouseEnter={(e) => {
-                                (e.currentTarget as HTMLElement).style.background =
-                                  "hsl(154 100% 49% / 0.1)";
-                                (e.currentTarget as HTMLElement).style.color =
-                                  "hsl(154 60% 35%)";
+                                (e.currentTarget as HTMLElement).style.background = "hsl(154 100% 49% / 0.15)";
+                                (e.currentTarget as HTMLElement).style.color = "hsl(154 60% 35%)";
                               }}
                               onMouseLeave={(e) => {
                                 (e.currentTarget as HTMLElement).style.background = "";
@@ -827,6 +878,8 @@ export default function AdminEventDetailPage() {
                             >
                               <Unlock className="h-3.5 w-3.5" />
                             </button>
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-slate-400 ml-auto" />
                           )}
                         </td>
                       </tr>
@@ -852,7 +905,7 @@ export default function AdminEventDetailPage() {
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-2 mt-1"
+                className="gap-2"
                 onClick={() => setShowRegisterForm(true)}
               >
                 <Plus className="h-4 w-4" />
@@ -860,8 +913,8 @@ export default function AdminEventDetailPage() {
               </Button>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </GlassCard>
 
       {/* ── Credentials modal ────────────────────────────────── */}
       {credentials && (
@@ -950,21 +1003,29 @@ export default function AdminEventDetailPage() {
               {/* Password row */}
               <div className="space-y-1.5">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Temporary Password
+                  {credentials.isNewUser ? "Temporary Password" : "Password"}
                 </p>
+                {!credentials.isNewUser ? (
+                  <div
+                    className="rounded-lg px-3 py-2.5 text-sm"
+                    style={{ background: "hsl(38 85% 95%)", border: "1px solid hsl(38 60% 82%)", color: "hsl(32 70% 32%)" }}
+                  >
+                    This user already had an account — their existing password remains unchanged. Use <strong>Reset Password</strong> if needed.
+                  </div>
+                ) : (
                 <div
                   className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5"
-                  style={{ background: "hsl(154 100% 49% / 0.06)", border: "1px solid hsl(154 100% 49% / 0.2)" }}
+                  style={{ background: "hsl(168 45% 95%)", border: "1px solid hsl(168 35% 82%)" }}
                 >
-                  <span className="font-mono text-sm font-semibold tracking-wider">
+                  <span className="font-mono text-sm font-semibold tracking-wider text-[hsl(168_55%_28%)]">
                     {credentials.password}
                   </span>
                   <button
-                    onClick={() => copyToClipboard(credentials.password, "password")}
+                    onClick={() => copyToClipboard(credentials.password ?? "", "password")}
                     className="shrink-0 h-7 w-7 rounded-md flex items-center justify-center transition-colors"
-                    style={{ color: "hsl(154 60% 35%)" }}
+                    style={{ color: "hsl(168 55% 35%)" }}
                     onMouseEnter={(e) =>
-                      ((e.currentTarget as HTMLElement).style.background = "hsl(154 100% 49% / 0.1)")
+                      ((e.currentTarget as HTMLElement).style.background = "hsl(168 45% 90%)")
                     }
                     onMouseLeave={(e) =>
                       ((e.currentTarget as HTMLElement).style.background = "")
@@ -978,6 +1039,7 @@ export default function AdminEventDetailPage() {
                     )}
                   </button>
                 </div>
+                )}
               </div>
 
               {/* Warning */}

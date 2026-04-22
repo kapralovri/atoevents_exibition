@@ -3,10 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/status-badge";
-import { StandZoneOverlay } from "@/components/stand-zone-overlay";
 import {
   Upload, FileImage, AlertCircle, CheckCircle2, Clock, Info,
-  Eye, Pen, Download, Send, X, RotateCcw,
+  Eye, Pen, Download, Send, X, RotateCcw, FileText,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
@@ -49,106 +48,29 @@ function uploadWithProgress(url: string, file: File, onProgress: (pct: number) =
   });
 }
 
-// ─── Preview Modal (server-rendered composite) ───────────────────────────────
-function PreviewModal({ exhibitorId, onClose }: { exhibitorId: number; onClose: () => void }) {
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
-
-  useEffect(() => {
-    let objectUrl: string | null = null;
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
-    const token   = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-
-    fetch(`${apiBase}/portal/exhibitors/${exhibitorId}/preview/render`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.detail ?? `Server error ${res.status}`);
-        }
-        const blob = await res.blob();
-        objectUrl = URL.createObjectURL(blob);
-        setImageUrl(objectUrl);
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to generate preview"))
-      .finally(() => setLoading(false));
-
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [exhibitorId]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(8,14,26,0.88)", backdropFilter: "blur(6px)" }}
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-3xl rounded-2xl overflow-hidden animate-fade-up"
-        style={{ background: "hsl(209 65% 12%)", border: "1px solid hsl(209 65% 28% / 0.4)", maxHeight: "92vh" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* header */}
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid hsl(209 65% 22% / 0.4)" }}>
-          <div className="flex items-center gap-3">
-            <Eye className="h-4 w-4" style={{ color: "hsl(154 100% 49%)" }} />
-            <h3 className="text-sm font-semibold text-white">Stand Preview</h3>
-            {!loading && !error && (
-              <span className="text-xs px-2 py-0.5 rounded-full"
-                style={{ background: "hsl(154 100% 49% / 0.12)", color: "hsl(154 80% 60%)" }}>
-                rendered
-              </span>
-            )}
-          </div>
-          <button onClick={onClose} className="h-7 w-7 rounded-lg flex items-center justify-center"
-            style={{ color: "hsl(210 30% 55%)" }}>
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="p-6 overflow-auto" style={{ maxHeight: "calc(92vh - 70px)" }}>
-          <div
-            className="relative w-full rounded-xl overflow-hidden flex items-center justify-center"
-            style={{ minHeight: 320, background: "hsl(209 65% 8%)", border: "1px solid hsl(209 65% 20% / 0.4)" }}
-          >
-            {loading && (
-              <div className="flex flex-col items-center gap-3 py-16">
-                <span className="h-8 w-8 rounded-full border-2 border-t-transparent animate-spin"
-                  style={{ borderColor: "hsl(154 100% 49% / 0.3)", borderTopColor: "hsl(154 100% 49%)" }} />
-                <p className="text-xs" style={{ color: "hsl(210 30% 50%)" }}>Generating stand preview…</p>
-              </div>
-            )}
-            {!loading && error && (
-              <div className="text-center py-12 px-6">
-                <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-40" style={{ color: "hsl(0 80% 60%)" }} />
-                <p className="text-sm font-medium text-white mb-1">Preview unavailable</p>
-                <p className="text-xs" style={{ color: "hsl(210 30% 50%)" }}>{error}</p>
-              </div>
-            )}
-            {!loading && imageUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt="Stand preview" className="w-full object-contain rounded-xl"
-                style={{ display: "block" }} />
-            )}
-          </div>
-
-          {!loading && imageUrl && (
-            <p className="mt-3 text-xs text-center" style={{ color: "hsl(210 30% 46%)" }}>
-              Your graphics composited on the stand template · approximate placement
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Approve Modal ────────────────────────────────────────────────────────────
 function ApproveModal({ exhibitorId, onClose, onApproved }: { exhibitorId: number; onClose: () => void; onApproved: () => void }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [signed, setSigned] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfFilename, setPdfFilename] = useState<string>("");
+  const [pdfLoading, setPdfLoading] = useState(true);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ url: string | null; filename: string | null }>("/portal/me/exhibitor/final-pdf")
+      .then((res) => {
+        if (!res.url) {
+          setPdfError("Administrator has not yet attached the final stand PDF. Please wait for review.");
+        } else {
+          setPdfUrl(res.url);
+          setPdfFilename(res.filename ?? "stand.pdf");
+        }
+      })
+      .catch(() => setPdfError("Failed to load the stand visualization PDF."))
+      .finally(() => setPdfLoading(false));
+  }, []);
 
   async function confirmApprove() {
     if (!signed) return;
@@ -174,14 +96,20 @@ function ApproveModal({ exhibitorId, onClose, onApproved }: { exhibitorId: numbe
       style={{ background: "rgba(8,14,26,0.88)", backdropFilter: "blur(6px)" }}
     >
       <div
-        className="relative w-full max-w-md rounded-2xl overflow-hidden animate-fade-up"
-        style={{ background: "hsl(209 65% 12%)", border: "1px solid hsl(209 65% 28% / 0.4)", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}
+        className="relative w-full rounded-2xl overflow-hidden animate-fade-up flex flex-col"
+        style={{
+          background: "hsl(209 65% 12%)",
+          border: "1px solid hsl(209 65% 28% / 0.4)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.5)",
+          maxWidth: step === 1 ? 1100 : 480,
+          maxHeight: "94vh",
+        }}
       >
         {/* top line */}
         <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: "linear-gradient(90deg, hsl(154 100% 49%), transparent)" }} />
 
         {/* step indicator */}
-        <div className="flex items-center gap-2 px-6 pt-6 pb-4">
+        <div className="flex items-center gap-2 px-6 pt-6 pb-4 shrink-0">
           {[1, 2, 3].map((s) => (
             <div key={s} className="flex items-center gap-2">
               <div
@@ -200,39 +128,82 @@ function ApproveModal({ exhibitorId, onClose, onApproved }: { exhibitorId: numbe
           <span className="ml-auto text-xs" style={{ color: "hsl(210 30% 50%)" }}>Step {step} of 3</span>
         </div>
 
-        <div className="px-6 pb-6">
-          {/* ── STEP 1: Info ── */}
+        <div className="px-6 pb-6 overflow-auto flex-1 min-h-0">
+          {/* ── STEP 1: Inline PDF from admin ── */}
           {step === 1 && (
             <>
-              <div className="mb-5">
-                <h3 className="text-base font-semibold text-white">Approve Graphics</h3>
+              <div className="mb-4">
+                <h3 className="text-base font-semibold text-white">Review Final Stand Visualization</h3>
                 <p className="text-sm mt-1" style={{ color: "hsl(210 25% 60%)" }}>
-                  You are about to confirm your booth graphics. Please review the checklist.
+                  The administrator has prepared the final stand file from your uploaded banners. Review the PDF below before confirming.
                 </p>
               </div>
-              <div className="space-y-2.5 mb-6">
-                {[
-                  "All uploaded files match the booth specifications",
-                  "File formats are TIFF, resolution 75–100 DPI",
-                  "Dimensions match the mm sizes from the technical requirements",
-                  "Content is final — no further edits after approval",
-                ].map((item) => (
-                  <div key={item} className="flex items-start gap-2.5">
-                    <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" style={{ color: "hsl(154 80% 45%)" }} />
-                    <span className="text-sm" style={{ color: "hsl(210 25% 68%)" }}>{item}</span>
+
+              <div
+                className="rounded-xl overflow-hidden mb-5"
+                style={{
+                  background: "hsl(210 18% 96%)",
+                  border: "1px solid hsl(209 65% 28% / 0.3)",
+                  height: "62vh",
+                  minHeight: 420,
+                }}
+              >
+                {pdfLoading ? (
+                  <div className="h-full flex flex-col items-center justify-center gap-3">
+                    <span
+                      className="h-8 w-8 rounded-full border-2 border-t-transparent animate-spin"
+                      style={{ borderColor: "hsl(154 100% 49% / 0.3)", borderTopColor: "hsl(154 100% 49%)" }}
+                    />
+                    <p className="text-xs" style={{ color: "hsl(210 30% 40%)" }}>Loading PDF…</p>
                   </div>
-                ))}
+                ) : pdfError ? (
+                  <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
+                    <AlertCircle className="h-10 w-10 opacity-50" style={{ color: "hsl(45 80% 40%)" }} />
+                    <p className="text-sm font-semibold" style={{ color: "hsl(209 65% 22%)" }}>
+                      Not ready yet
+                    </p>
+                    <p className="text-xs max-w-sm" style={{ color: "hsl(210 14% 40%)" }}>{pdfError}</p>
+                  </div>
+                ) : pdfUrl ? (
+                  <iframe
+                    src={`${pdfUrl}#view=FitH&toolbar=1`}
+                    title="Final stand visualization"
+                    className="w-full h-full"
+                    style={{ border: 0, background: "white" }}
+                  />
+                ) : null}
               </div>
+
               <div className="flex gap-3">
                 <button onClick={onClose} className="flex-1 h-10 rounded-xl text-sm font-medium" style={{ background: "hsl(209 65% 21% / 0.4)", color: "hsl(210 30% 60%)", border: "1px solid hsl(209 65% 28% / 0.3)" }}>
                   Cancel
                 </button>
+                {pdfUrl && (
+                  <a
+                    href={pdfUrl}
+                    download={pdfFilename || "stand.pdf"}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 h-10 rounded-xl text-sm font-medium px-4"
+                    style={{ background: "hsl(209 65% 21% / 0.4)", color: "hsl(210 30% 70%)", border: "1px solid hsl(209 65% 28% / 0.3)" }}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download
+                  </a>
+                )}
                 <button
                   onClick={() => setStep(2)}
-                  className="flex-1 h-10 rounded-xl text-sm font-semibold"
-                  style={{ background: "linear-gradient(135deg, hsl(154 100% 42%), hsl(154 80% 36%))", color: "hsl(209 65% 10%)" }}
+                  disabled={!pdfUrl}
+                  className="flex-1 h-10 rounded-xl text-sm font-semibold transition-opacity"
+                  style={{
+                    background: pdfUrl
+                      ? "linear-gradient(135deg, hsl(154 100% 42%), hsl(154 80% 36%))"
+                      : "hsl(209 65% 21% / 0.4)",
+                    color: pdfUrl ? "hsl(209 65% 10%)" : "hsl(210 30% 40%)",
+                    cursor: pdfUrl ? "pointer" : "not-allowed",
+                  }}
                 >
-                  Continue
+                  Continue to Sign
                 </button>
               </div>
             </>
@@ -431,13 +402,11 @@ export default function GraphicsPage() {
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [uploadingFile, setUploadingFile] = useState<File | null>(null);
   const [standPackage, setStandPackage] = useState<string>("");
-  const [standConfiguration, setStandConfiguration] = useState<string>("LINEAR");
   const [exhibitorId, setExhibitorId] = useState<number | null>(null);
   const [graphicsLocked, setGraphicsLocked] = useState(false);
-  const [backdropUrl, setBackdropUrl] = useState<string | null>(null);
+  const [finalPdfReady, setFinalPdfReady] = useState(false);
 
   // modals
-  const [showPreview, setShowPreview]     = useState(false);
   const [showApprove, setShowApprove]     = useState(false);
   const [showRequest, setShowRequest]     = useState(false);
 
@@ -446,11 +415,11 @@ export default function GraphicsPage() {
     setElements(data);
   };
 
-  const reloadPreview = async (exId: number) => {
+  const reloadFinalPdf = async () => {
     try {
-      const preview = await apiFetch<{ backdrop_url: string | null }>(`/portal/exhibitors/${exId}/preview`);
-      setBackdropUrl(preview.backdrop_url ?? null);
-    } catch { /* ignore */ }
+      const res = await apiFetch<{ url: string | null }>("/portal/me/exhibitor/final-pdf");
+      setFinalPdfReady(!!res.url);
+    } catch { setFinalPdfReady(false); }
   };
 
   useEffect(() => {
@@ -459,26 +428,21 @@ export default function GraphicsPage() {
         await reload();
       } catch { toast.error("Failed to load graphics elements"); }
       try {
-        const ex = await apiFetch<{ stand_package: string; stand_configuration: string; id: number; locks: { graphics: boolean }; graphics_status: string }>("/portal/me/exhibitor");
+        const ex = await apiFetch<{ stand_package: string; id: number; locks: { graphics: boolean }; graphics_status: string }>("/portal/me/exhibitor");
         setStandPackage(ex.stand_package ?? "");
-        setStandConfiguration(ex.stand_configuration ?? "LINEAR");
         setExhibitorId(ex.id);
-        // Lock uploads if admin locked OR status is under review / approved
-        const statusLocked = ["UNDER_REVIEW", "APPROVED"].includes((ex.graphics_status ?? "").toUpperCase());
+        // Lock uploads only if admin explicitly locked OR all graphics approved
+        const statusLocked = ["APPROVED"].includes((ex.graphics_status ?? "").toUpperCase());
         setGraphicsLocked((ex.locks?.graphics ?? false) || statusLocked);
-        // Fetch backdrop URL for zone overlay
-        try {
-          const preview = await apiFetch<{ backdrop_url: string | null }>(`/portal/exhibitors/${ex.id}/preview`);
-          setBackdropUrl(preview.backdrop_url ?? null);
-        } catch { /* no backdrop yet */ }
+        await reloadFinalPdf();
       } catch {}
     }
     fetchAll();
   }, []);
 
   const handleFileUpload = async (elementId: string, file: File) => {
-    if (!file.name.toLowerCase().match(/\.(tiff?|tif|pdf)$/)) {
-      toast.error("Only TIFF (.tif, .tiff) or PDF files are accepted"); return;
+    if (!file.name.toLowerCase().match(/\.(tiff?|tif|pdf|jpe?g|jpg)$/)) {
+      toast.error("Only TIFF, JPG or PDF files are accepted"); return;
     }
     if (file.size > 500 * 1024 * 1024) {
       toast.error("File size exceeds the 500 MB limit"); return;
@@ -510,18 +474,12 @@ export default function GraphicsPage() {
       });
       toast.success("File uploaded — under review");
       await reload();
-      if (exhibitorId) await reloadPreview(exhibitorId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed");
     } finally {
       setUploading(null); setUploadingFile(null);
       setUploadProgress((p) => { const n = { ...p }; delete n[elementId]; return n; });
     }
-  };
-
-  const openPreview = () => {
-    if (!exhibitorId) return;
-    setShowPreview(true);
   };
 
   const handleApproved = async () => {
@@ -537,7 +495,7 @@ export default function GraphicsPage() {
   const reqCount    = standPackage ? (REQUIRED_FILES[standPackage] ?? required) : required;
   const allUploaded = uploaded >= reqCount;
   const allUnderReview = elements.length > 0 && elements.every((e) => ["under_review","approved"].includes(e.status));
-  const canApprove  = allUnderReview && !graphicsLocked;
+  const canApprove  = allUnderReview && !graphicsLocked && finalPdfReady;
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -549,21 +507,6 @@ export default function GraphicsPage() {
           <p className="page-description">Upload TIFF or PDF files for each booth element · max 500 MB each</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Preview button */}
-          {uploaded > 0 && exhibitorId && (
-            <button
-              onClick={openPreview}
-              className="flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors"
-              style={{
-                background: "hsl(209 65% 21% / 0.1)",
-                color: "hsl(209 65% 38%)",
-                border: "1px solid hsl(209 65% 21% / 0.2)",
-              }}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              Preview Stand
-            </button>
-          )}
           <div
             className="flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold"
             style={{ background: "hsl(154 80% 94%)", color: "hsl(154 60% 28%)", border: "1px solid hsl(154 60% 82%)" }}
@@ -579,7 +522,7 @@ export default function GraphicsPage() {
         style={{ background: "hsl(209 65% 21% / 0.06)", border: "1px solid hsl(209 65% 21% / 0.12)" }}>
         <Info className="h-4 w-4 mt-0.5 shrink-0" style={{ color: "hsl(209 65% 38%)" }} />
         <p style={{ color: "hsl(209 50% 30%)" }}>
-          <strong>Accepted format:</strong> TIFF / TIF only · DPI 75–100 · Files are validated automatically after upload.
+          <strong>Accepted formats:</strong> TIFF / TIF · JPG / JPEG · PDF · DPI 75–100 · Files are validated automatically after upload.
           If revision is requested, re-upload your corrected file.
         </p>
       </div>
@@ -610,21 +553,45 @@ export default function GraphicsPage() {
         </div>
       ) : canApprove ? (
         <div className="flex items-center justify-between gap-4 rounded-xl px-4 py-3"
-          style={{ background: "hsl(209 65% 21% / 0.07)", border: "1px solid hsl(209 65% 21% / 0.15)" }}>
-          <div>
-            <p className="text-sm font-semibold" style={{ color: "hsl(209 65% 22%)" }}>All files submitted — ready to approve</p>
-            <p className="text-xs mt-0.5" style={{ color: "hsl(209 50% 40%)" }}>
-              Review the checklist and digitally sign to approve your graphics.
-            </p>
+          style={{ background: "hsl(154 80% 94%)", border: "1px solid hsl(154 60% 78%)" }}>
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-lg flex items-center justify-center"
+              style={{ background: "hsl(154 60% 38% / 0.15)" }}>
+              <FileText className="h-4 w-4" style={{ color: "hsl(154 60% 28%)" }} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: "hsl(154 60% 22%)" }}>
+                Final stand PDF is ready for review
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: "hsl(154 50% 32%)" }}>
+                Open the visualization, verify everything is correct, and sign to approve.
+              </p>
+            </div>
           </div>
           <button
             onClick={() => setShowApprove(true)}
             className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold shrink-0"
             style={{ background: "linear-gradient(135deg, hsl(154 100% 42%), hsl(154 80% 36%))", color: "hsl(209 65% 10%)" }}
           >
-            <Pen className="h-3.5 w-3.5" />
-            Approve Graphics
+            <Eye className="h-3.5 w-3.5" />
+            Review & Sign
           </button>
+        </div>
+      ) : allUnderReview && !graphicsLocked ? (
+        <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+          style={{ background: "hsl(45 100% 94%)", border: "1px solid hsl(45 80% 78%)" }}>
+          <div className="h-9 w-9 rounded-lg flex items-center justify-center"
+            style={{ background: "hsl(45 80% 40% / 0.15)" }}>
+            <Clock className="h-4 w-4" style={{ color: "hsl(45 80% 32%)" }} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "hsl(38 80% 24%)" }}>
+              Waiting for administrator review
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: "hsl(38 60% 32%)" }}>
+              Your banners have been uploaded. Once the administrator verifies them and attaches the final stand PDF, you'll be able to review and approve here.
+            </p>
+          </div>
         </div>
       ) : standPackage ? (
         /* progress banner */
@@ -656,43 +623,6 @@ export default function GraphicsPage() {
           </div>
         </div>
       ) : null}
-
-      {/* ── Interactive Stand Zone Overlay ──────────────────────── */}
-      {(backdropUrl || elements.length > 0) && (
-        <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid hsl(213 20% 88%)" }}>
-          <div className="flex items-center justify-between px-5 py-3"
-            style={{ borderBottom: "1px solid hsl(213 20% 90%)", background: "hsl(213 20% 98%)" }}>
-            <div className="flex items-center gap-2">
-              <Eye className="h-4 w-4" style={{ color: "hsl(213 50% 45%)" }} />
-              <span className="text-sm font-semibold" style={{ color: "hsl(213 20% 28%)" }}>
-                Stand Layout — Upload by Zone
-              </span>
-            </div>
-            {standConfiguration && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
-                style={{ background: "hsl(213 80% 94%)", color: "hsl(213 60% 38%)" }}>
-                {standConfiguration}
-              </span>
-            )}
-          </div>
-          <div className="p-5" style={{ background: "hsl(213 20% 99%)" }}>
-            <StandZoneOverlay
-              backdropUrl={backdropUrl}
-              standConfiguration={standConfiguration}
-              slots={elements.map((e) => ({
-                id: e.id,
-                label: e.label,
-                status: e.status,
-                preview_url: e.preview_url,
-              }))}
-              onUpload={handleFileUpload}
-              uploading={uploading}
-              uploadProgress={uploadProgress}
-              locked={graphicsLocked}
-            />
-          </div>
-        </div>
-      )}
 
       {/* ── Elements grid ────────────────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -774,7 +704,7 @@ export default function GraphicsPage() {
 
                 {canUpload && (
                   <div>
-                    <input type="file" id={`file-${element.id}`} className="hidden" accept=".tiff,.tif,.pdf"
+                    <input type="file" id={`file-${element.id}`} className="hidden" accept=".tiff,.tif,.pdf,.jpg,.jpeg"
                       disabled={isUploading}
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(element.id, f); }}
                     />
@@ -813,9 +743,9 @@ export default function GraphicsPage() {
                           </div>
                           <div>
                             <p className="text-sm font-semibold text-foreground">
-                              {element.status === "revision" ? "Upload revised file" : "Upload TIFF file"}
+                              {element.status === "revision" ? "Upload revised file" : "Upload graphic file"}
                             </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">Drag & drop or click · TIFF only · max 500 MB</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Drag & drop or click · TIFF / JPG / PDF · max 500 MB</p>
                           </div>
                         </>
                       )}
@@ -843,7 +773,6 @@ export default function GraphicsPage() {
       )}
 
       {/* ── Modals ──────────────────────────────────────────────── */}
-      {showPreview && exhibitorId && <PreviewModal exhibitorId={exhibitorId} onClose={() => setShowPreview(false)} />}
       {showApprove && exhibitorId && (
         <ApproveModal exhibitorId={exhibitorId} onClose={() => setShowApprove(false)} onApproved={handleApproved} />
       )}

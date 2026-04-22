@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Users, Plus, Trash2, Send, CheckCircle2, Info, User,
-  Lock, MessageSquare, X, Loader2,
+  Lock, MessageSquare, X, Loader2, Eye,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
@@ -142,6 +143,7 @@ function RequestModal({
 
 // ── Main Page ────────────────────────────────────────────────────────────────
 export default function ParticipantsPage() {
+  const router = useRouter();
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [status, setStatus] = useState<string>("not_submitted");
   const [adminComment, setAdminComment] = useState<string | null>(null);
@@ -150,6 +152,7 @@ export default function ParticipantsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [complimentaryQuota, setComplimentaryQuota] = useState<number>(1);
   const [showRequest, setShowRequest] = useState(false);
+  const isUnderReview = status === "UNDER_REVIEW" || status === "under_review";
 
   useEffect(() => {
     async function fetchParticipants() {
@@ -200,8 +203,9 @@ export default function ParticipantsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ participants }),
       });
-      setStatus("submitted");
-      toast.success("Participants submitted successfully");
+      setStatus("UNDER_REVIEW");
+      toast.success("Participants submitted — under review");
+      router.push("/tasks");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Submission failed");
     } finally {
@@ -209,8 +213,8 @@ export default function ParticipantsPage() {
     }
   };
 
-  const isSubmitted = status === "submitted";
-  const canEdit = !isLocked && !isSubmitted;
+  const isSubmitted = status === "submitted" || status === "SUBMITTED";
+  const canEdit = !isLocked && !isSubmitted && !isUnderReview;
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -266,8 +270,23 @@ export default function ParticipantsPage() {
         </div>
       )}
 
+      {/* Under review banner */}
+      {isUnderReview && !isLocked && (
+        <div
+          className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium animate-fade-up"
+          style={{
+            background: "hsl(209 65% 21% / 0.07)",
+            border: "1px solid hsl(209 65% 21% / 0.2)",
+            color: "hsl(209 65% 28%)",
+          }}
+        >
+          <Eye className="h-5 w-5 shrink-0" />
+          Your participants list has been submitted and is under review. Editing is disabled until reviewed.
+        </div>
+      )}
+
       {/* Submitted (not locked) banner */}
-      {isSubmitted && !isLocked && (
+      {isSubmitted && !isLocked && !isUnderReview && (
         <div
           className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium"
           style={{

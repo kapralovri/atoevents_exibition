@@ -23,12 +23,10 @@ import {
   Layers,
   Globe,
   Clock,
-  Package,
   FileText,
-  Image as ImageIcon,
-  Upload,
-  Check,
   Settings,
+  Search,
+  ArrowUpDown,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -40,17 +38,16 @@ interface Event {
   id: string;
   name: string;
   date: string;
+  end_date?: string | null;
   location: string;
+  website_url?: string;
   status: string;
   exhibitor_count: number;
   completed_count: number;
-}
-
-interface StandSlot {
-  enabled: boolean;
-  alias: string;
-  count: number;
-  area_m2: number;
+  deadline_graphics_initial?: string | null;
+  deadline_company_profile?: string | null;
+  deadline_participants?: string | null;
+  deadline_final_graphics?: string | null;
 }
 
 interface NewEventForm {
@@ -65,24 +62,11 @@ interface NewEventForm {
   deadline_company_profile: string;
   deadline_participants: string;
   deadline_final_graphics: string;
-  // Section 3 — Stand slots (keyed by package)
-  slots: Record<string, StandSlot>;
-  // Section 4 — Documents / Backdrops (handled post-create)
-  arrivalPdfFile: File | null;
-  backdropFiles: Record<string, File | null>;
 }
 
 type FieldErrors = Partial<Record<keyof NewEventForm | string, string>>;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const SLOT_KEYS = ["SHELL_ONLY", "SYSTEM", "BESPOKE"] as const;
-
-const DEFAULT_SLOTS: Record<string, StandSlot> = {
-  SHELL_ONLY: { enabled: true, alias: "START",      count: 10, area_m2: 9 },
-  SYSTEM:     { enabled: true, alias: "PRO",        count: 5,  area_m2: 18 },
-  BESPOKE:    { enabled: false,alias: "INDIVIDUAL", count: 0,  area_m2: 0 },
-};
 
 const DEADLINE_OFFSETS: Record<string, number> = {
   deadline_graphics_initial: 90,
@@ -127,9 +111,6 @@ function blankForm(): NewEventForm {
     deadline_company_profile: "",
     deadline_participants: "",
     deadline_final_graphics: "",
-    slots: structuredClone(DEFAULT_SLOTS),
-    arrivalPdfFile: null,
-    backdropFiles: { SHELL_ONLY: null, SYSTEM: null, BESPOKE: null },
   };
 }
 
@@ -196,34 +177,256 @@ function FieldError({ msg }: { msg?: string }) {
   return <p className="text-xs text-red-500 mt-1">{msg}</p>;
 }
 
-function ToggleSwitch({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className="relative inline-flex h-5 w-9 items-center rounded-full shrink-0 transition-colors duration-200"
-      style={{
-        background: checked ? "hsl(209 65% 38%)" : "hsl(213 20% 80%)",
-      }}
-    >
-      <span
-        className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform duration-200"
-        style={{ transform: checked ? "translateX(18px)" : "translateX(2px)" }}
-      />
-    </button>
-  );
-}
-
 // ── Progress helper ───────────────────────────────────────────────────────────
 
 function pct(completed: number, total: number) {
   return total === 0 ? 0 : Math.round((completed / total) * 100);
+}
+
+// ── Event thumbnail (deterministic gradient + initials from name) ─────────────
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function eventInitials(name: string): string {
+  return (
+    name
+      .replace(/[^A-Za-zА-Яа-я0-9 ]/g, "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => w[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "EV"
+  );
+}
+
+const THUMB_PALETTES: Array<{ from: string; to: string; fg: string }> = [
+  { from: "hsl(192 80% 18%)", to: "hsl(162 55% 30%)", fg: "hsl(154 85% 70%)" }, // teal→mint
+  { from: "hsl(0 0% 12%)",     to: "hsl(348 55% 28%)", fg: "hsl(348 95% 68%)" }, // charcoal→pink
+  { from: "hsl(214 50% 22%)",  to: "hsl(200 45% 35%)", fg: "hsl(165 75% 75%)" }, // navy→cyan
+  { from: "hsl(260 35% 22%)",  to: "hsl(280 40% 40%)", fg: "hsl(265 90% 82%)" }, // violet
+  { from: "hsl(25 55% 22%)",   to: "hsl(15 60% 38%)",  fg: "hsl(35 100% 75%)" }, // amber
+];
+
+// ── Deadline helper ───────────────────────────────────────────────────────────
+
+const DEADLINE_FIELDS: Array<{ key: keyof Event; label: string }> = [
+  { key: "deadline_final_graphics",   label: "Final graphics" },
+  { key: "deadline_participants",     label: "Participants" },
+  { key: "deadline_company_profile",  label: "Company profile" },
+  { key: "deadline_graphics_initial", label: "Initial graphics" },
+];
+
+function nextUpcomingDeadline(ev: Event): { label: string; date: string; daysLeft: number } | null {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const nowTs = now.getTime();
+
+  const future: Array<{ label: string; date: string; daysLeft: number }> = [];
+  const overdue: Array<{ label: string; date: string; daysLeft: number }> = [];
+  for (const f of DEADLINE_FIELDS) {
+    const v = ev[f.key] as string | null | undefined;
+    if (!v) continue;
+    const d = new Date(v);
+    if (isNaN(d.getTime())) continue;
+    const daysLeft = Math.round((d.getTime() - nowTs) / (24 * 3600 * 1000));
+    const row = { label: f.label, date: v, daysLeft };
+    if (daysLeft < 0) overdue.push(row);
+    else future.push(row);
+  }
+  if (overdue.length) {
+    // Worst overdue first
+    overdue.sort((a, b) => a.daysLeft - b.daysLeft);
+    return overdue[0];
+  }
+  if (future.length) {
+    future.sort((a, b) => a.daysLeft - b.daysLeft);
+    return future[0];
+  }
+  return null;
+}
+
+// ── Pagination helpers ────────────────────────────────────────────────────────
+
+function pageNumbers(current: number, total: number): Array<number | "…"> {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: Array<number | "…"> = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) out.push("…");
+  for (let i = start; i <= end; i++) out.push(i);
+  if (end < total - 1) out.push("…");
+  out.push(total);
+  return out;
+}
+
+function PagerBtn({
+  children,
+  active,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center justify-center rounded-md text-[11px] font-semibold active:scale-95"
+      style={{
+        width: 26,
+        height: 26,
+        background: active ? "hsl(154 70% 36%)" : "transparent",
+        color: active ? "#fff" : disabled ? "hsl(210 10% 70%)" : "hsl(209 50% 22%)",
+        border: active ? "1px solid hsl(154 70% 36%)" : "1px solid hsl(210 18% 88%)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "background-color 120ms, color 120ms, transform 100ms",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── Filter dropdown ───────────────────────────────────────────────────────────
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onPick,
+  highlighted,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ key: string; label: string }>;
+  onPick: (key: string) => void;
+  highlighted?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5 active:scale-95"
+        style={{
+          background: highlighted ? "hsl(154 80% 94%)" : "#FFFFFF",
+          color: highlighted ? "hsl(154 70% 28%)" : "hsl(210 10% 38%)",
+          border: highlighted ? "1px solid hsl(154 60% 72%)" : "1px solid hsl(210 18% 88%)",
+          transition: "background-color 120ms, color 120ms, border-color 120ms, transform 100ms",
+        }}
+      >
+        {label}: {value}
+        <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-[calc(100%+4px)] z-30 min-w-[160px] py-1 rounded-lg animate-fade-up"
+          style={{
+            background: "#FFFFFF",
+            border: "1px solid hsl(210 18% 88%)",
+            boxShadow: "0 8px 24px -12px hsl(209 30% 20% / 0.18)",
+          }}
+        >
+          {options.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => {
+                onPick(o.key);
+                setOpen(false);
+              }}
+              className="block w-full text-left text-xs font-medium px-3 py-1.5"
+              style={{
+                color: o.label === value || o.key === value ? "hsl(154 70% 28%)" : "hsl(209 50% 22%)",
+                background: "transparent",
+              }}
+              onMouseEnter={(e) =>
+                ((e.currentTarget as HTMLElement).style.background = "hsl(210 20% 96%)")
+              }
+              onMouseLeave={(e) =>
+                ((e.currentTarget as HTMLElement).style.background = "transparent")
+              }
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventThumb({
+  name,
+  website,
+  size = 40,
+}: {
+  name: string;
+  website?: string;
+  size?: number;
+}) {
+  // When a website URL is present, derive palette from the site host so all
+  // events on the same domain share stylistics (proxy for brand). Later this
+  // will be replaced by real colours extracted from the site on the backend.
+  let host = "";
+  try {
+    if (website) host = new URL(website).hostname.replace(/^www\./, "");
+  } catch {
+    host = "";
+  }
+  const paletteKey = host || name;
+  const palette = THUMB_PALETTES[hashString(paletteKey) % THUMB_PALETTES.length];
+  const initials = eventInitials(name);
+  return (
+    <div
+      className="relative rounded-lg shrink-0 overflow-hidden flex items-center justify-center"
+      style={{
+        width: size,
+        height: size,
+        background: `linear-gradient(135deg, ${palette.from} 0%, ${palette.to} 100%)`,
+        border: "1px solid hsl(210 18% 88%)",
+      }}
+      aria-hidden="true"
+    >
+      <span
+        style={{
+          color: palette.fg,
+          fontFamily: "Manrope, Inter, system-ui, sans-serif",
+          fontWeight: 900,
+          fontSize: size * 0.34,
+          letterSpacing: "-0.02em",
+          lineHeight: 1,
+        }}
+      >
+        {initials}
+      </span>
+      <span
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none"
+        style={{ background: "linear-gradient(135deg, transparent 40%, rgba(0,0,0,0.18) 100%)" }}
+      />
+    </div>
+  );
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
@@ -235,23 +438,21 @@ export default function AdminEventsPage() {
   const [form, setForm] = useState<NewEventForm>(blankForm());
   const [errors, setErrors] = useState<FieldErrors>({});
   const [isCreating, setIsCreating] = useState(false);
-  const [createdEventId, setCreatedEventId] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
 
   // Section open/closed state
   const [openSections, setOpenSections] = useState({
     metadata: true,
     deadlines: true,
-    slots: false,
-    docs: false,
   });
 
-  const pdfInputRef = useRef<HTMLInputElement>(null);
-  const backdropRefs = {
-    SHELL_ONLY: useRef<HTMLInputElement>(null),
-    SYSTEM: useRef<HTMLInputElement>(null),
-    BESPOKE: useRef<HTMLInputElement>(null),
-  };
+  // ── Filters ─────────────────────────────────────────────────────────
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "upcoming" | "past" | "draft">("all");
+  const [yearFilter, setYearFilter] = useState<string>("all");
+  const [sortDesc, setSortDesc] = useState(true);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 8;
+
 
   // Load events on mount
   useEffect(() => {
@@ -283,16 +484,6 @@ export default function AdminEventsPage() {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
-  function setSlot(slotKey: string, field: keyof StandSlot, value: unknown) {
-    setForm((prev) => ({
-      ...prev,
-      slots: {
-        ...prev.slots,
-        [slotKey]: { ...prev.slots[slotKey], [field]: value },
-      },
-    }));
-  }
-
   // ── Validation ──────────────────────────────────────────────────────────────
 
   function validate(): FieldErrors {
@@ -315,16 +506,6 @@ export default function AdminEventsPage() {
       const val = (form as unknown as Record<string, string>)[key];
       if (val && val >= form.start_date)
         e[key] = "Deadline must be before start date";
-    });
-
-    // Slots: if enabled, count must be > 0 and area > 0
-    SLOT_KEYS.forEach((sk) => {
-      const slot = form.slots[sk];
-      if (slot.enabled) {
-        if (slot.count <= 0) e[`slot_count_${sk}`] = "Count must be > 0";
-        if (slot.area_m2 <= 0) e[`slot_area_${sk}`] = "Area must be > 0";
-        if (!slot.alias.trim()) e[`slot_alias_${sk}`] = "Enter a name";
-      }
     });
 
     return e;
@@ -353,19 +534,6 @@ export default function AdminEventsPage() {
       deadline_company_profile: form.deadline_company_profile || null,
       deadline_participants: form.deadline_participants || null,
       deadline_final_graphics: form.deadline_final_graphics || null,
-      alias_shell: form.slots.SHELL_ONLY.alias,
-      alias_system: form.slots.SYSTEM.alias,
-      alias_bespoke: form.slots.BESPOKE.alias,
-      stand_slots: Object.fromEntries(
-        SLOT_KEYS.map((sk) => [
-          sk,
-          {
-            enabled: form.slots[sk].enabled,
-            count: form.slots[sk].count,
-            area_m2: form.slots[sk].area_m2,
-          },
-        ])
-      ),
     };
 
     try {
@@ -374,10 +542,13 @@ export default function AdminEventsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      setCreatedEventId(String(created.id));
-      toast.success("Event created — upload documents now");
-      setOpenSections((prev) => ({ ...prev, docs: true }));
+      const newId = String(created.id);
+      toast.success("Event created — configure stand inventory in Settings");
+      setShowCreateForm(false);
+      setForm(blankForm());
+      setErrors({});
       await loadEvents();
+      router.push(`/admin/events/${newId}/settings`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create event");
     } finally {
@@ -385,96 +556,10 @@ export default function AdminEventsPage() {
     }
   }
 
-  // ── Phase 2: Upload PDF + backdrops ────────────────────────────────────────
-
-  async function handleUploadDocs() {
-    if (!createdEventId) return;
-    setIsUploading(true);
-
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
-    const token = localStorage.getItem("access_token");
-    const headers = { Authorization: `Bearer ${token}` };
-
-    try {
-      // Upload arrival PDF
-      if (form.arrivalPdfFile) {
-        const presignRes = await fetch(
-          `${apiBase}/admin/events/${createdEventId}/documents/presign`,
-          {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              filename: form.arrivalPdfFile.name,
-              doc_type: "setup_schedule",
-              title: "График заезда",
-              content_type: "application/pdf",
-            }),
-          }
-        );
-        if (presignRes.ok) {
-          const { upload_url, s3_key } = await presignRes.json();
-          await fetch(upload_url, {
-            method: "PUT",
-            body: form.arrivalPdfFile,
-            headers: { "Content-Type": "application/pdf" },
-          });
-          await fetch(`${apiBase}/admin/events/${createdEventId}/documents/complete`, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ s3_key }),
-          });
-        }
-      }
-
-      // Upload backdrop images
-      for (const sk of SLOT_KEYS) {
-        const file = form.backdropFiles[sk];
-        if (!file) continue;
-        const presignRes = await fetch(`${apiBase}/admin/backdrop/presign`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            event_id: createdEventId,
-            stand_package: sk,
-            filename: file.name,
-            content_type: file.type,
-          }),
-        });
-        if (presignRes.ok) {
-          const { upload_url, s3_key } = await presignRes.json();
-          await fetch(upload_url, {
-            method: "PUT",
-            body: file,
-            headers: { "Content-Type": file.type },
-          });
-          await fetch(`${apiBase}/admin/backdrop/complete`, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              event_id: createdEventId,
-              stand_package: sk,
-              s3_key,
-            }),
-          });
-        }
-      }
-
-      toast.success("Documents uploaded successfully");
-      setShowCreateForm(false);
-      setForm(blankForm());
-      setCreatedEventId(null);
-    } catch {
-      toast.error("Failed to upload files");
-    } finally {
-      setIsUploading(false);
-    }
-  }
-
   function handleCancelCreate() {
     setShowCreateForm(false);
     setForm(blankForm());
     setErrors({});
-    setCreatedEventId(null);
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -520,14 +605,11 @@ export default function AdminEventsPage() {
                   >
                     <Plus className="h-4 w-4" style={{ color: "hsl(209 65% 38%)" }} />
                   </div>
-                  {createdEventId
-                    ? "Upload Documents"
-                    : "Create Event"}
+                  Create Event
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1">
-                {!createdEventId ? (
-                  <form onSubmit={handleCreateEvent} className="space-y-2">
+                <form onSubmit={handleCreateEvent} className="space-y-2">
 
                     {/* ── Section 1: Metadata ── */}
                     <div
@@ -657,7 +739,7 @@ export default function AdminEventsPage() {
                                   <FieldLabel htmlFor={key}>
                                     {DEADLINE_LABELS[key]}
                                     <span className="ml-1.5 text-muted-foreground/60 normal-case font-normal">
-                                      (−{DEADLINE_OFFSETS[key]}д)
+                                      (−{DEADLINE_OFFSETS[key]}d)
                                     </span>
                                   </FieldLabel>
                                   <Input
@@ -678,94 +760,17 @@ export default function AdminEventsPage() {
                       )}
                     </div>
 
-                    {/* ── Section 3: Stand slots ── */}
-                    <div
-                      className="rounded-xl overflow-hidden"
-                      style={{ border: "1px solid hsl(209 65% 21% / 0.1)" }}
-                    >
-                      <div className="px-4 pt-3 pb-1">
-                        <SectionHeader
-                          icon={Package}
-                          title="3. Stand Types"
-                          open={openSections.slots}
-                          onToggle={() => toggleSection("slots")}
-                        />
-                      </div>
-                      {openSections.slots && (
-                        <div
-                          className="px-4 pb-4 pt-2 space-y-3"
-                          style={{ background: "hsl(209 65% 21% / 0.015)" }}
-                        >
-                          <div className="space-y-3">
-                            {/* Header row */}
-                            <div className="grid grid-cols-[auto_1fr_80px_80px] gap-3 items-center">
-                              <span className="w-10" />
-                              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</span>
-                              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground text-center">Count</span>
-                              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground text-center">m²</span>
-                            </div>
-                            {SLOT_KEYS.map((sk) => {
-                              const slot = form.slots[sk];
-                              return (
-                                <div
-                                  key={sk}
-                                  className="grid grid-cols-[auto_1fr_80px_80px] gap-3 items-start"
-                                >
-                                  <div className="flex items-center gap-2 pt-2">
-                                    <ToggleSwitch
-                                      checked={slot.enabled}
-                                      onChange={(v) => setSlot(sk, "enabled", v)}
-                                    />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Input
-                                      value={slot.alias}
-                                      onChange={(e) =>
-                                        setSlot(sk, "alias", e.target.value)
-                                      }
-                                      placeholder={DEFAULT_SLOTS[sk].alias}
-                                      disabled={!slot.enabled}
-                                      className={`text-sm ${!slot.enabled ? "opacity-40" : ""} ${errors[`slot_alias_${sk}`] ? "border-red-400" : ""}`}
-                                    />
-                                    <FieldError msg={errors[`slot_alias_${sk}`]} />
-                                    <p className="text-xs text-muted-foreground/60">{sk}</p>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Input
-                                      type="number"
-                                      min={0}
-                                      value={slot.count}
-                                      onChange={(e) =>
-                                        setSlot(sk, "count", parseInt(e.target.value) || 0)
-                                      }
-                                      disabled={!slot.enabled}
-                                      className={`text-sm text-center ${!slot.enabled ? "opacity-40" : ""} ${errors[`slot_count_${sk}`] ? "border-red-400" : ""}`}
-                                    />
-                                    <FieldError msg={errors[`slot_count_${sk}`]} />
-                                  </div>
-                                  <div className="space-y-1">
-                                    <Input
-                                      type="number"
-                                      min={0}
-                                      step={0.5}
-                                      value={slot.area_m2}
-                                      onChange={(e) =>
-                                        setSlot(sk, "area_m2", parseFloat(e.target.value) || 0)
-                                      }
-                                      disabled={!slot.enabled}
-                                      className={`text-sm text-center ${!slot.enabled ? "opacity-40" : ""} ${errors[`slot_area_${sk}`] ? "border-red-400" : ""}`}
-                                    />
-                                    <FieldError msg={errors[`slot_area_${sk}`]} />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
+                    {/* ── Note about stand inventory ── */}
+                    <div className="flex items-start gap-2.5 rounded-xl px-4 py-3 text-xs"
+                      style={{ background: "hsl(209 65% 21% / 0.05)", border: "1px solid hsl(209 65% 21% / 0.12)", color: "hsl(209 50% 35%)" }}>
+                      <Layers className="h-3.5 w-3.5 mt-0.5 shrink-0" style={{ color: "hsl(209 65% 38%)" }} />
+                      <span>
+                        Stand inventory (types, configurations, areas) and backdrop images are configured in{" "}
+                        <strong>Event Settings</strong> after creation.
+                      </span>
                     </div>
 
-                    {/* ── Submit Phase 1 ── */}
+                    {/* ── Submit ── */}
                     <div className="flex gap-2 pt-2">
                       <Button type="submit" disabled={isCreating} className="gap-2">
                         {isCreating ? (
@@ -781,336 +786,429 @@ export default function AdminEventsPage() {
                         Cancel
                       </Button>
                     </div>
-                  </form>
-                ) : (
-                  // ── Phase 2: Document upload (after event created) ──────────────
-                  <div className="space-y-4">
-                    <div
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
-                      style={{
-                        background: "hsl(154 100% 49% / 0.08)",
-                        color: "hsl(154 60% 28%)",
-                        border: "1px solid hsl(154 100% 49% / 0.2)",
-                      }}
-                    >
-                      <Check className="h-4 w-4 shrink-0" />
-                      Event created (ID: {createdEventId}). Upload documents below.
-                    </div>
-
-                    {/* ── Section 4: Docs & Backdrops ── */}
-                    <div
-                      className="rounded-xl overflow-hidden"
-                      style={{ border: "1px solid hsl(209 65% 21% / 0.1)" }}
-                    >
-                      <div className="px-4 pt-3 pb-1">
-                        <SectionHeader
-                          icon={ImageIcon}
-                          title="4. Documents & Backdrop Images"
-                          open={openSections.docs}
-                          onToggle={() => toggleSection("docs")}
-                        />
-                      </div>
-                      {openSections.docs && (
-                        <div
-                          className="px-4 pb-4 pt-2 space-y-5"
-                          style={{ background: "hsl(209 65% 21% / 0.015)" }}
-                        >
-                          {/* Arrival schedule PDF */}
-                          <div className="space-y-2">
-                            <FieldLabel>Arrival Schedule (PDF)</FieldLabel>
-                            <div className="flex items-center gap-3">
-                              <input
-                                ref={pdfInputRef}
-                                type="file"
-                                accept="application/pdf"
-                                className="hidden"
-                                onChange={(e) =>
-                                  setForm({
-                                    ...form,
-                                    arrivalPdfFile: e.target.files?.[0] ?? null,
-                                  })
-                                }
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="gap-2"
-                                onClick={() => pdfInputRef.current?.click()}
-                              >
-                                <Upload className="h-3.5 w-3.5" />
-                                Choose File
-                              </Button>
-                              {form.arrivalPdfFile && (
-                                <span className="text-sm text-muted-foreground truncate max-w-xs">
-                                  {form.arrivalPdfFile.name}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Backdrop images per booth type */}
-                          <div className="space-y-3">
-                            <FieldLabel>
-                              Booth Backdrops (JPEG/PNG, per stand type)
-                            </FieldLabel>
-                            <div className="space-y-2">
-                              {SLOT_KEYS.map((sk) => (
-                                <div key={sk} className="flex items-center gap-3">
-                                  <span
-                                    className="text-xs font-semibold rounded px-2 py-1 shrink-0"
-                                    style={{
-                                      background: "hsl(209 65% 21% / 0.07)",
-                                      color: "hsl(209 65% 28%)",
-                                      minWidth: "80px",
-                                      textAlign: "center",
-                                    }}
-                                  >
-                                    {form.slots[sk].alias}
-                                  </span>
-                                  <input
-                                    ref={backdropRefs[sk]}
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp"
-                                    className="hidden"
-                                    onChange={(e) =>
-                                      setForm({
-                                        ...form,
-                                        backdropFiles: {
-                                          ...form.backdropFiles,
-                                          [sk]: e.target.files?.[0] ?? null,
-                                        },
-                                      })
-                                    }
-                                  />
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="gap-2"
-                                    onClick={() =>
-                                      backdropRefs[sk].current?.click()
-                                    }
-                                  >
-                                    <Upload className="h-3.5 w-3.5" />
-                                    Choose
-                                  </Button>
-                                  {form.backdropFiles[sk] && (
-                                    <span className="text-sm text-muted-foreground truncate max-w-xs">
-                                      {form.backdropFiles[sk]!.name}
-                                    </span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        onClick={handleUploadDocs}
-                        disabled={isUploading}
-                        className="gap-2"
-                      >
-                        {isUploading ? (
-                          <>
-                            <span className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                            Uploading…
-                          </>
-                        ) : (
-                          "Upload & Finish"
-                        )}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleCancelCreate}
-                      >
-                        Skip
-                      </Button>
-                    </div>
-                  </div>
-                )}
+                </form>
               </CardContent>
             </Card>
           )}
 
-          {/* ── Events list (row layout) ──────────────────────────── */}
-          {events.length > 0 ? (
-            <div className="space-y-2">
-              {events.map((event, i) => {
-                const progress = pct(event.completed_count, event.exhibitor_count);
+          {/* ── Filter bar ─────────────────────────────────────────── */}
+          {events.length > 0 && (() => {
+            // Derive year options from loaded events
+            const years = Array.from(
+              new Set(
+                events
+                  .map((e) => (e.date ? new Date(e.date).getFullYear() : null))
+                  .filter((y): y is number => y !== null)
+              )
+            ).sort((a, b) => b - a);
+
+            const statusLabel =
+              statusFilter === "all" ? "All" : statusFilter[0].toUpperCase() + statusFilter.slice(1);
+            const yearLabel = yearFilter === "all" ? "Any" : yearFilter;
+
+            return (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[260px] max-w-[420px]">
+                  <Search
+                    className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4"
+                    style={{ color: "hsl(210 10% 55%)" }}
+                  />
+                  <Input
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Search by name, city, venue…"
+                    className="pl-9 bg-white"
+                  />
+                </div>
+
+                <FilterSelect
+                  label="Status"
+                  value={statusLabel}
+                  highlighted={statusFilter !== "all"}
+                  options={[
+                    { key: "all",      label: "All statuses" },
+                    { key: "active",   label: "Active" },
+                    { key: "upcoming", label: "Upcoming" },
+                    { key: "past",     label: "Past" },
+                    { key: "draft",    label: "Draft" },
+                  ]}
+                  onPick={(k) => {
+                    setStatusFilter(k as typeof statusFilter);
+                    setPage(1);
+                  }}
+                />
+
+                <FilterSelect
+                  label="Year"
+                  value={yearLabel}
+                  highlighted={yearFilter !== "all"}
+                  options={[
+                    { key: "all", label: "Any year" },
+                    ...years.map((y) => ({ key: String(y), label: String(y) })),
+                  ]}
+                  onPick={(k) => {
+                    setYearFilter(k);
+                    setPage(1);
+                  }}
+                />
+
+                <div className="flex-1" />
+
+                <button
+                  type="button"
+                  onClick={() => setSortDesc((v) => !v)}
+                  className="text-xs font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5 active:scale-95"
+                  style={{
+                    background: "#FFFFFF",
+                    color: "hsl(210 10% 38%)",
+                    border: "1px solid hsl(210 18% 88%)",
+                  }}
+                  title="Toggle sort order"
+                >
+                  <ArrowUpDown className="h-3.5 w-3.5" />
+                  Date {sortDesc ? "↓" : "↑"}
+                </button>
+              </div>
+            );
+          })()}
+
+          {/* ── Events table ──────────────────────────────────────── */}
+          {(() => {
+            const q = search.trim().toLowerCase();
+            const filtered = events
+              .filter((ev) => {
+                if (statusFilter !== "all" && (ev.status || "").toLowerCase() !== statusFilter) {
+                  return false;
+                }
+                if (yearFilter !== "all") {
+                  const y = ev.date ? String(new Date(ev.date).getFullYear()) : "";
+                  if (y !== yearFilter) return false;
+                }
+                if (!q) return true;
                 return (
-                  <div
-                    key={event.id}
-                    className={[
-                      "group relative flex items-center gap-4 rounded-xl overflow-hidden",
-                      `stagger-${Math.min(i + 1, 4)} animate-fade-up`,
-                    ].join(" ")}
-                    style={{
-                      background: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      padding: "14px 16px",
-                      transition: "border-color 150ms cubic-bezier(0.23,1,0.32,1), box-shadow 150ms cubic-bezier(0.23,1,0.32,1)",
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.borderColor =
-                        "hsl(209 65% 21% / 0.25)";
-                      (e.currentTarget as HTMLElement).style.boxShadow =
-                        "0 2px 12px hsl(209 65% 21% / 0.08)";
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.borderColor = "";
-                      (e.currentTarget as HTMLElement).style.boxShadow = "";
-                    }}
-                  >
-                    {/* Left accent stripe */}
-                    <div
-                      className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full"
-                      style={{
-                        background:
-                          progress === 100
-                            ? "linear-gradient(180deg, hsl(154 100% 49%), hsl(170 80% 44%))"
-                            : progress > 50
-                            ? "hsl(209 65% 50%)"
-                            : "hsl(209 65% 21% / 0.2)",
-                      }}
-                    />
-
-                    {/* Clickable area → event detail */}
-                    <Link
-                      href={`/admin/events/${event.id}`}
-                      className="flex flex-1 min-w-0 items-center gap-4"
-                    >
-                      {/* Event name + meta */}
-                      <div className="flex-1 min-w-0 pl-3">
-                        <p className="font-semibold text-sm text-foreground truncate">
-                          {event.name}
-                        </p>
-                        <div className="flex items-center gap-3 mt-0.5">
-                          {event.location && (
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <MapPin className="h-3 w-3 shrink-0" />
-                              <span className="truncate max-w-[160px]">{event.location}</span>
-                            </span>
-                          )}
-                          {event.date && (
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Calendar className="h-3 w-3 shrink-0" />
-                              {new Date(event.date).toLocaleDateString("en-GB", {
-                                day: "numeric",
-                                month: "short",
-                                year: "numeric",
-                              })}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Status badge */}
-                      <div className="shrink-0">
-                        <StatusBadge status={event.status} />
-                      </div>
-
-                      {/* Participant count */}
-                      <div className="shrink-0 flex items-center gap-1.5 text-xs text-muted-foreground min-w-[64px]">
-                        <Users className="h-3.5 w-3.5" />
-                        <span>{event.exhibitor_count} exh.</span>
-                      </div>
-
-                      {/* Progress bar */}
-                      <div className="shrink-0 w-36 space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground">
-                            {event.completed_count}/{event.exhibitor_count}
-                          </span>
-                          <span
-                            className="font-semibold tabular-nums"
-                            style={{
-                              color:
-                                progress === 100
-                                  ? "hsl(154 60% 32%)"
-                                  : "hsl(209 65% 28%)",
-                            }}
-                          >
-                            {progress}%
-                          </span>
-                        </div>
-                        <div className="h-1.5 rounded-full overflow-hidden bg-muted">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${progress}%`,
-                              transition: "width 500ms cubic-bezier(0.23,1,0.32,1)",
-                              background:
-                                progress === 100
-                                  ? "linear-gradient(90deg, hsl(154 100% 49%), hsl(170 80% 44%))"
-                                  : "hsl(209 65% 45%)",
-                            }}
-                          />
-                        </div>
-                      </div>
-
-                      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
-                    </Link>
-
-                    {/* Settings button — outside the Link so it doesn't navigate to detail */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        router.push(`/admin/events/${event.id}/settings`);
-                      }}
-                      title="Event settings"
-                      className="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 active:scale-95"
-                      style={{
-                        background: "hsl(209 65% 21% / 0.06)",
-                        color: "hsl(209 65% 38%)",
-                        transition: "opacity 150ms ease, background-color 120ms cubic-bezier(0.23,1,0.32,1), transform 100ms cubic-bezier(0.23,1,0.32,1)",
-                      }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLElement).style.background = "hsl(209 65% 21% / 0.12)";
-                        (e.currentTarget as HTMLElement).style.color = "hsl(209 65% 21%)";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.background = "hsl(209 65% 21% / 0.06)";
-                        (e.currentTarget as HTMLElement).style.color = "hsl(209 65% 38%)";
-                      }}
-                    >
-                      <Settings className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                  ev.name.toLowerCase().includes(q) ||
+                  (ev.location || "").toLowerCase().includes(q)
                 );
-              })}
-            </div>
-          ) : (
-            <Card className="card-elevated">
-              <CardContent className="flex flex-col items-center justify-center py-16 gap-4">
+              })
+              .sort((a, b) => {
+                const da = new Date(a.date || 0).getTime();
+                const db = new Date(b.date || 0).getTime();
+                return sortDesc ? db - da : da - db;
+              });
+
+            const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+            const safePage = Math.min(page, totalPages);
+            const pageStart = (safePage - 1) * PAGE_SIZE;
+            const pageEnd = pageStart + PAGE_SIZE;
+            const pageRows = filtered.slice(pageStart, pageEnd);
+
+            if (events.length === 0) {
+              return (
+                <Card className="card-elevated">
+                  <CardContent className="flex flex-col items-center justify-center py-16 gap-4">
+                    <div
+                      className="h-16 w-16 rounded-2xl flex items-center justify-center"
+                      style={{ background: "hsl(154 80% 94%)" }}
+                    >
+                      <Layers className="h-8 w-8" style={{ color: "hsl(154 70% 34%)" }} />
+                    </div>
+                    <div className="text-center">
+                      <p className="font-semibold text-foreground">No events yet</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Create your first exhibition event to get started
+                      </p>
+                    </div>
+                    <Button variant="outline" onClick={() => setShowCreateForm(true)} className="gap-2 mt-1">
+                      <Plus className="h-4 w-4" />
+                      Create First Event
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            if (filtered.length === 0) {
+              return (
+                <Card className="card-elevated">
+                  <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                    No events match the current filters.
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            const gridCols =
+              "minmax(0,1.7fr) minmax(0,1.1fr) 90px minmax(0,0.9fr) minmax(0,1fr) 110px 44px";
+
+            return (
+              <div
+                className="rounded-xl overflow-hidden"
+                style={{ background: "#FFFFFF", border: "1px solid hsl(210 18% 90%)" }}
+              >
+                {/* Table header */}
                 <div
-                  className="h-16 w-16 rounded-2xl flex items-center justify-center"
-                  style={{ background: "hsl(209 65% 21% / 0.07)" }}
+                  className="hidden md:grid items-center gap-4 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em]"
+                  style={{
+                    background: "hsl(210 20% 97%)",
+                    color: "hsl(210 10% 48%)",
+                    borderBottom: "1px solid hsl(210 18% 90%)",
+                    gridTemplateColumns: gridCols,
+                  }}
                 >
-                  <Layers className="h-8 w-8" style={{ color: "hsl(209 65% 38%)" }} />
+                  <div>Event</div>
+                  <div>Location / Dates</div>
+                  <div>Exhibitors</div>
+                  <div>Readiness</div>
+                  <div>Deadline</div>
+                  <div>Status</div>
+                  <div></div>
                 </div>
-                <div className="text-center">
-                  <p className="font-semibold text-foreground">No events yet</p>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Create your first exhibition event to get started
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowCreateForm(true)}
-                  className="gap-2 mt-1"
+
+                {/* Rows */}
+                {pageRows.map((event, i) => {
+                  const progress = pct(event.completed_count, event.exhibitor_count);
+                  const progressBg =
+                    progress === 100
+                      ? "hsl(154 70% 42%)"
+                      : progress >= 50
+                      ? "hsl(154 70% 42%)"
+                      : progress >= 20
+                      ? "hsl(45 85% 50%)"
+                      : "hsl(210 14% 70%)";
+                  const nextDeadline = nextUpcomingDeadline(event);
+                  return (
+                    <div
+                      key={event.id}
+                      className={[
+                        "group relative grid items-center gap-4 px-4 py-3",
+                        "grid-cols-1 md:grid",
+                        `stagger-${Math.min(i + 1, 4)} animate-fade-up`,
+                      ].join(" ")}
+                      style={{
+                        borderTop: i === 0 ? "none" : "1px solid hsl(210 18% 93%)",
+                        transition: "background-color 120ms",
+                        gridTemplateColumns: gridCols,
+                      }}
+                      onMouseEnter={(e) =>
+                        ((e.currentTarget as HTMLElement).style.background = "hsl(210 20% 98%)")
+                      }
+                      onMouseLeave={(e) =>
+                        ((e.currentTarget as HTMLElement).style.background = "")
+                      }
+                    >
+                      <Link
+                        href={`/admin/events/${event.id}`}
+                        className="contents"
+                        aria-label={`Open ${event.name}`}
+                      >
+                        {/* Event (thumbnail + name) */}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <EventThumb name={event.name} website={event.website_url} />
+                          <div className="min-w-0">
+                            <p className="font-semibold text-sm text-foreground truncate">
+                              {event.name}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                              #EV-{String(event.id).padStart(3, "0")}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Location / Dates */}
+                        <div className="min-w-0 text-xs">
+                          <div className="flex items-center gap-1.5 text-foreground font-medium truncate">
+                            <MapPin className="h-3 w-3 shrink-0 text-muted-foreground" />
+                            <span className="truncate">
+                              {event.location || <span className="text-muted-foreground">TBD</span>}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-muted-foreground mt-0.5">
+                            <Calendar className="h-3 w-3 shrink-0" />
+                            <span>
+                              {event.date
+                                ? new Date(event.date).toLocaleDateString("en-GB", {
+                                    day: "numeric",
+                                    month: "short",
+                                    year: "numeric",
+                                  })
+                                : "—"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Exhibitors */}
+                        <div className="text-sm">
+                          <span className="font-bold text-foreground">
+                            {event.exhibitor_count}
+                          </span>
+                          <span className="text-xs text-muted-foreground ml-1 inline-flex items-center gap-1">
+                            <Users className="h-3 w-3" />
+                            exh.
+                          </span>
+                        </div>
+
+                        {/* Readiness */}
+                        <div className="min-w-0">
+                          <div className="flex items-center justify-between text-[11px] mb-1">
+                            <span className="text-muted-foreground tabular-nums">
+                              {event.completed_count}/{event.exhibitor_count}
+                            </span>
+                            <span
+                              className="font-bold tabular-nums"
+                              style={{
+                                color:
+                                  progress === 100
+                                    ? "hsl(154 70% 30%)"
+                                    : "hsl(209 50% 22%)",
+                              }}
+                            >
+                              {progress}%
+                            </span>
+                          </div>
+                          <div
+                            className="h-1.5 rounded-full overflow-hidden"
+                            style={{ background: "hsl(210 18% 92%)" }}
+                          >
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${progress}%`,
+                                transition: "width 500ms cubic-bezier(0.23,1,0.32,1)",
+                                background: progressBg,
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Deadline */}
+                        <div className="min-w-0 text-xs">
+                          {nextDeadline ? (
+                            <>
+                              <div
+                                className="font-semibold tabular-nums"
+                                style={{
+                                  color:
+                                    nextDeadline.daysLeft < 0
+                                      ? "hsl(0 72% 48%)"
+                                      : nextDeadline.daysLeft <= 7
+                                      ? "hsl(25 90% 42%)"
+                                      : "hsl(209 50% 22%)",
+                                }}
+                              >
+                                {nextDeadline.daysLeft < 0
+                                  ? `${Math.abs(nextDeadline.daysLeft)}d overdue`
+                                  : `D−${nextDeadline.daysLeft}`}
+                              </div>
+                              <div className="text-muted-foreground truncate">
+                                {nextDeadline.label} ·{" "}
+                                {new Date(nextDeadline.date).toLocaleDateString("en-GB", {
+                                  day: "numeric",
+                                  month: "short",
+                                })}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </div>
+
+                        {/* Status */}
+                        <div className="shrink-0">
+                          <StatusBadge status={event.status} />
+                        </div>
+                      </Link>
+
+                      {/* Settings button (outside Link) */}
+                      <div className="flex justify-end">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/admin/events/${event.id}/settings`);
+                          }}
+                          title="Event settings"
+                          className="h-8 w-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 active:scale-95"
+                          style={{
+                            color: "hsl(210 12% 52%)",
+                            transition: "opacity 150ms, background-color 120ms, color 120ms, transform 100ms",
+                          }}
+                          onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLElement).style.background = "hsl(210 18% 92%)";
+                            (e.currentTarget as HTMLElement).style.color = "hsl(209 65% 22%)";
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLElement).style.background = "transparent";
+                            (e.currentTarget as HTMLElement).style.color = "hsl(210 12% 52%)";
+                          }}
+                        >
+                          <Settings className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Footer + pagination */}
+                <div
+                  className="flex items-center justify-between px-4 py-2.5 text-xs"
+                  style={{
+                    borderTop: "1px solid hsl(210 18% 93%)",
+                    color: "hsl(210 10% 52%)",
+                    background: "hsl(210 20% 98%)",
+                  }}
                 >
-                  <Plus className="h-4 w-4" />
-                  Create First Event
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+                  <div>
+                    Showing{" "}
+                    <b style={{ color: "hsl(209 50% 22%)" }}>
+                      {filtered.length === 0
+                        ? 0
+                        : `${pageStart + 1}–${Math.min(pageEnd, filtered.length)}`}
+                    </b>{" "}
+                    of {filtered.length}
+                    {filtered.length !== events.length && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · filtered from {events.length}
+                      </span>
+                    )}
+                  </div>
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1">
+                      <PagerBtn
+                        disabled={safePage === 1}
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      >
+                        ‹
+                      </PagerBtn>
+                      {pageNumbers(safePage, totalPages).map((n, idx) =>
+                        n === "…" ? (
+                          <span key={`e-${idx}`} className="px-1 text-muted-foreground">
+                            …
+                          </span>
+                        ) : (
+                          <PagerBtn
+                            key={n}
+                            active={n === safePage}
+                            onClick={() => setPage(Number(n))}
+                          >
+                            {n}
+                          </PagerBtn>
+                        )
+                      )}
+                      <PagerBtn
+                        disabled={safePage === totalPages}
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      >
+                        ›
+                      </PagerBtn>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
     </div>
   );
 }

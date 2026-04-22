@@ -1,19 +1,29 @@
 import type { Metadata } from "next";
-import { Outfit, JetBrains_Mono } from "next/font/google";
+import { Manrope, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "sonner";
 
-const outfit = Outfit({
+// Display (headings) — Manrope, as in mockup-glass.html
+const manrope = Manrope({
   subsets: ["latin"],
-  variable: "--font-geist",
+  variable: "--font-display",
   weight: ["300", "400", "500", "600", "700", "800"],
   display: "swap",
 });
 
+// Body (UI text) — Inter, as in mockup-glass.html
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-body",
+  weight: ["300", "400", "500", "600", "700"],
+  display: "swap",
+});
+
+// Mono (numbers / tabular) — kept for metric cards
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  variable: "--font-mono-ui",
   weight: ["400", "500", "600", "700"],
   display: "swap",
 });
@@ -37,7 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </head>
-      <body className={`${outfit.variable} ${jetbrainsMono.variable}`}>
+      <body className={`${manrope.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
         {/* Grain noise overlay — breaks digital flatness without affecting interaction */}
         <div
           aria-hidden="true"
@@ -46,7 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             inset: 0,
             pointerEvents: "none",
             zIndex: 9998,
-            opacity: 0.036,
+            opacity: 0.028,
             backgroundImage: GRAIN,
             backgroundSize: "180px 180px",
           }}

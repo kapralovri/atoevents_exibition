@@ -25,6 +25,8 @@ const badgeVariants = cva(
           "bg-muted text-muted-foreground border-border",
         accent:
           "bg-[hsl(154_100%_90%)] text-[hsl(154_60%_22%)] border-[hsl(154_60%_78%)]",
+        active:
+          "bg-[hsl(154_80%_94%)] text-[hsl(154_70%_26%)] border-[hsl(154_60%_72%)] uppercase tracking-wider text-[10px] px-2 py-0.5 font-bold",
       },
     },
     defaultVariants: {

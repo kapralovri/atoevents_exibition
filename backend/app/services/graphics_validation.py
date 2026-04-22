@@ -9,11 +9,12 @@ from app.config import settings
 from app.services.stand_matrix import GraphicSlot, expected_pixel_range
 
 # Allowed source formats
-ALLOWED_EXTENSIONS = {".tif", ".tiff", ".pdf"}
+ALLOWED_EXTENSIONS = {".tif", ".tiff", ".pdf", ".jpg", ".jpeg"}
 ALLOWED_MIME_TYPES = {
     "image/tiff",
+    "image/jpeg",
     "application/pdf",
-    "application/octet-stream",  # some browsers send this for TIFF
+    "application/octet-stream",  # some browsers send this for TIFF or JPEG
 }
 
 
@@ -133,11 +134,37 @@ def validate_pdf_from_path(path: str, slot: GraphicSlot) -> tuple[bool, str, dic
         return False, f"Invalid or corrupted PDF: {e}", {}
 
 
+def validate_jpeg_from_path(path: str, slot: GraphicSlot) -> tuple[bool, str, dict]:
+    """Validate JPEG/JPG file — soft size check, no DPI enforcement."""
+    try:
+        with Image.open(path) as im:
+            im = ImageOps.exif_transpose(im)
+            w, h = im.size
+        dpi_x, dpi_y = 96.0, 96.0  # JPEGs rarely carry accurate DPI
+        meta = {"width_px": w, "height_px": h, "dpi_x": dpi_x, "dpi_y": dpi_y}
+        wmin, wmax, hmin, hmax = expected_pixel_range(slot.width_mm, slot.height_mm)
+        tol = max(slot.tolerance_pct / 100.0, 0.30)
+        w_ok = wmin * (1 - tol) <= w <= wmax * (1 + tol)
+        h_ok = hmin * (1 - tol) <= h <= hmax * (1 + tol)
+        if not (w_ok and h_ok):
+            warning = (
+                f"⚠ JPEG size {w}×{h} px may not match print specs for {slot.label}. "
+                f"Admin will verify before production."
+            )
+            meta["size_warning"] = warning
+            return True, warning, meta
+        return True, "", meta
+    except Exception as e:  # noqa: BLE001
+        return False, f"Invalid or corrupted JPEG: {e}", {}
+
+
 def validate_graphic_from_path(path: str, slot: GraphicSlot) -> tuple[bool, str, dict]:
-    """Auto-detect TIFF or PDF and validate accordingly."""
+    """Auto-detect TIFF, PDF, or JPEG and validate accordingly."""
     ext = _ext(path)
     if ext == ".pdf":
         return validate_pdf_from_path(path, slot)
+    if ext in (".jpg", ".jpeg"):
+        return validate_jpeg_from_path(path, slot)
     return validate_tiff_from_path(path, slot)
 
 

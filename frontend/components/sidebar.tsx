@@ -4,9 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Calendar,
-  FileImage,
-  FileText,
-  Users,
   LogOut,
   BarChart3,
   ClipboardList,
@@ -26,21 +23,22 @@ interface NavItem {
   href: string;
   icon: React.ElementType;
   role: "exhibitor" | "admin" | "both";
+  section?: "main" | "workspace";
 }
 
 const navItems: NavItem[] = [
   // Exhibitor
-  { title: "Dashboard",       href: "/dashboard",       icon: LayoutDashboard, role: "exhibitor" },
-  { title: "Events",          href: "/events",           icon: Calendar,        role: "exhibitor" },
-  { title: "Tasks",           href: "/tasks",            icon: CheckSquare,     role: "exhibitor" },
-  { title: "Equipment",       href: "/equipment",        icon: ShoppingCart,    role: "exhibitor" },
-  { title: "Exb Manuals",     href: "/manuals",          icon: BookOpen,        role: "exhibitor" },
-  { title: "Setup Schedule",  href: "/setup-schedule",   icon: CalendarDays,    role: "exhibitor" },
+  { title: "Dashboard",       href: "/dashboard",       icon: LayoutDashboard, role: "exhibitor", section: "main" },
+  { title: "Events",          href: "/events",           icon: Calendar,        role: "exhibitor", section: "main" },
+  { title: "Tasks",           href: "/tasks",            icon: CheckSquare,     role: "exhibitor", section: "main" },
+  { title: "Equipment",       href: "/equipment",        icon: ShoppingCart,    role: "exhibitor", section: "main" },
+  { title: "Exb Manuals",     href: "/manuals",          icon: BookOpen,        role: "exhibitor", section: "main" },
+  { title: "Setup Schedule",  href: "/setup-schedule",   icon: CalendarDays,    role: "exhibitor", section: "main" },
   // Admin
-  { title: "Events",          href: "/admin/events",     icon: Calendar,        role: "admin" },
-  { title: "Tasks",           href: "/admin/tasks",      icon: CheckSquare,     role: "admin" },
-  { title: "Audit Log",       href: "/admin/audit",      icon: ClipboardList,   role: "admin" },
-  { title: "Analytics",       href: "/admin/analytics",  icon: BarChart3,       role: "admin" },
+  { title: "Events",          href: "/admin/events",     icon: Calendar,        role: "admin", section: "main" },
+  { title: "Tasks",           href: "/admin/tasks",      icon: CheckSquare,     role: "admin", section: "main" },
+  { title: "Audit Log",       href: "/admin/audit",      icon: ClipboardList,   role: "admin", section: "main" },
+  { title: "Analytics",       href: "/admin/analytics",  icon: BarChart3,       role: "admin", section: "main" },
 ];
 
 interface SidebarProps {
@@ -49,6 +47,24 @@ interface SidebarProps {
   companyName?: string;
   collapsed?: boolean;
   onCollapsedChange?: (v: boolean) => void;
+}
+
+// ── Brand mark: rounded square + chevron (wing) + orbit circle ───────────────
+function BrandMark({ size = 32 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="1" y="1" width="38" height="38" rx="10" fill="hsl(209 65% 21%)" />
+      <rect x="1" y="1" width="38" height="38" rx="10" stroke="url(#bm-stroke)" strokeWidth="1.2" />
+      <path d="M10 27 L20 11 L30 27" stroke="hsl(154 100% 49%)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <circle cx="20" cy="24" r="3.2" stroke="hsl(154 100% 49%)" strokeWidth="2.2" fill="none" />
+      <defs>
+        <linearGradient id="bm-stroke" x1="0" y1="0" x2="40" y2="40">
+          <stop stopColor="hsl(154 100% 49%)" stopOpacity="0.55" />
+          <stop offset="1" stopColor="hsl(154 100% 49%)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
 }
 
 export function Sidebar({
@@ -78,137 +94,62 @@ export function Sidebar({
 
   const displayName = companyName || userEmail || "";
   const initials = displayName
-    .split(" ")
+    .split(/[ @]/)
     .map((w) => w[0]?.toUpperCase())
+    .filter(Boolean)
     .slice(0, 2)
     .join("") || "?";
-
-  const w = isCollapsed ? "w-16" : "w-64";
 
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 h-screen flex flex-col transition-all duration-300 overflow-hidden",
-        w
+        "fixed left-4 top-4 bottom-4 z-40 flex flex-col transition-all duration-300 rounded-2xl bg-white/95 backdrop-blur-md border border-slate-200/80 shadow-[0_4px_24px_rgba(15,23,42,0.06)]",
+        isCollapsed ? "w-[72px]" : "w-[240px]"
       )}
-      style={{
-        background: "linear-gradient(180deg, hsl(209 65% 22%) 0%, hsl(209 65% 17%) 100%)",
-        borderRight: "1px solid hsl(209 60% 16%)",
-      }}
     >
-      {/* Ambient radial glow behind logo */}
-      <div
-        aria-hidden="true"
-        className="absolute top-0 left-0 right-0 pointer-events-none"
-        style={{
-          height: "160px",
-          background:
-            "radial-gradient(ellipse at 50% -10%, hsl(154 100% 49% / 0.08) 0%, transparent 70%)",
-        }}
-      />
+      {/* ── Floating toggle on the outer edge (never overlaps logo) ── */}
+      <button
+        onClick={toggle}
+        aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        className="absolute -right-3 top-20 z-10 h-6 w-6 rounded-full flex items-center justify-center bg-white border border-slate-200 text-slate-500 hover:text-slate-800 hover:border-slate-300 shadow-sm transition-all active:scale-90"
+      >
+        {isCollapsed
+          ? <ChevronRight className="h-3 w-3" />
+          : <ChevronLeft className="h-3 w-3" />
+        }
+      </button>
 
       {/* ── Header ──────────────────────────────────────────────── */}
-      <div
-        className="relative flex h-16 items-center px-3 shrink-0"
-        style={{ borderBottom: "1px solid hsl(209 60% 16%)" }}
-      >
-        {!isCollapsed && (
-          <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-8">
-            <div
-              className="shrink-0 flex items-center justify-center h-8 w-8 rounded-lg"
-              style={{
-                background: "hsl(154 100% 49% / 0.08)",
-                border: "1px solid hsl(154 100% 49% / 0.18)",
-                boxShadow: "0 0 16px hsl(154 100% 49% / 0.07)",
-              }}
-            >
-              <svg width="18" height="14" viewBox="0 0 36 20" fill="none">
-                <text
-                  x="0" y="15"
-                  fontFamily="system-ui"
-                  fontSize="12"
-                  fontWeight="300"
-                  letterSpacing="1"
-                  fill="#e8e8e8"
-                >
-                  a/c
-                </text>
-                <line
-                  x1="17" y1="2" x2="20" y2="19"
-                  stroke="#00fc90"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </div>
-            <div className="min-w-0">
-              <p className="text-white text-xs font-semibold leading-tight tracking-wide truncate">
-                Exhibition Management
-              </p>
+      <div className="relative flex h-[64px] items-center shrink-0 border-b border-slate-100 px-4">
+        {!isCollapsed ? (
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <BrandMark size={30} />
+            <div className="min-w-0 leading-tight">
               <p
-                className="text-[10px] leading-tight truncate"
-                style={{ color: "hsl(210 40% 42%)" }}
+                className="text-[14px] font-extrabold tracking-tight text-[hsl(212_40%_16%)] truncate"
+                style={{ fontFamily: "Manrope, Inter, system-ui, sans-serif" }}
               >
-                Platform
+                ato<span className="text-[hsl(168_55%_38%)]">/</span>comm
+              </p>
+              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400 mt-0.5 truncate">
+                Exhibitor Portal
               </p>
             </div>
           </div>
-        )}
-
-        {isCollapsed && (
+        ) : (
           <div className="flex items-center justify-center w-full">
-            <div
-              className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
-              style={{
-                background: "hsl(154 100% 49% / 0.08)",
-                border: "1px solid hsl(154 100% 49% / 0.18)",
-              }}
-            >
-              <svg width="18" height="14" viewBox="0 0 36 20" fill="none">
-                <text
-                  x="0" y="15"
-                  fontFamily="system-ui"
-                  fontSize="12"
-                  fontWeight="300"
-                  letterSpacing="1"
-                  fill="#e8e8e8"
-                >
-                  a/c
-                </text>
-                <line
-                  x1="17" y1="2" x2="20" y2="19"
-                  stroke="#00fc90"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </div>
+            <BrandMark size={30} />
           </div>
         )}
-
-        {/* Collapse toggle */}
-        <button
-          onClick={toggle}
-          className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 rounded-md flex items-center justify-center hover:bg-[hsl(209_65%_30%/0.35)] hover:text-[hsl(210_40%_62%)] active:scale-95"
-          style={{
-            color: "hsl(210 40% 42%)",
-            transition: "background-color 120ms cubic-bezier(0.23,1,0.32,1), color 120ms cubic-bezier(0.23,1,0.32,1), transform 100ms cubic-bezier(0.23,1,0.32,1)",
-          }}
-          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {isCollapsed
-            ? <ChevronRight className="h-3.5 w-3.5" />
-            : <ChevronLeft className="h-3.5 w-3.5" />
-          }
-        </button>
       </div>
 
       {/* ── Navigation ────────────────────────────────────────────── */}
       <nav className="relative flex-1 overflow-y-auto py-3 px-2">
         {!isCollapsed && (
           <p
-            className="px-3 mb-2 text-[9px] font-semibold uppercase tracking-[0.18em]"
-            style={{ color: "hsl(210 40% 36%)" }}
+            className="px-3 mb-2 text-[10px] font-bold uppercase tracking-[0.2em]"
+            style={{ color: "hsl(210 10% 55%)" }}
           >
             {userRole === "admin" ? "Administration" : "My Exhibition"}
           </p>
@@ -227,34 +168,37 @@ export function Sidebar({
                   className={cn(
                     "group relative flex items-center gap-3 rounded-lg text-sm",
                     isCollapsed ? "px-0 py-2.5 justify-center" : "px-3 py-2.5",
-                    isActive
-                      ? "text-white font-semibold"
-                      : "font-medium text-[hsl(210_40%_55%)] hover:text-[hsl(210_40%_78%)] hover:bg-[hsl(209_65%_16%/0.45)] active:scale-[0.98]"
+                    "active:scale-[0.98]"
                   )}
                   style={{
-                    transition: "background-color 120ms cubic-bezier(0.23,1,0.32,1), color 120ms cubic-bezier(0.23,1,0.32,1), transform 100ms cubic-bezier(0.23,1,0.32,1)",
-                    ...(isActive
-                      ? {
-                          background: "hsl(209 65% 13%)",
-                          boxShadow: "inset 0 1px 0 hsl(0 0% 100% / 0.03)",
-                        }
-                      : {}),
+                    transition: "background-color 120ms, color 120ms, transform 100ms",
+                    fontWeight: isActive ? 600 : 500,
+                    color: isActive ? "hsl(168 55% 28%)" : "hsl(215 15% 40%)",
+                    background: isActive ? "hsl(168 55% 96%)" : "transparent",
+                    border: isActive ? "1px solid hsl(168 45% 85%)" : "1px solid transparent",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      (e.currentTarget as HTMLElement).style.background = "hsl(214 20% 96%)";
+                      (e.currentTarget as HTMLElement).style.color = "hsl(212 40% 20%)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      (e.currentTarget as HTMLElement).style.background = "transparent";
+                      (e.currentTarget as HTMLElement).style.color = "hsl(215 15% 40%)";
+                    }
                   }}
                 >
-                  {/* Active green left bar with glow */}
                   {isActive && !isCollapsed && (
                     <span
-                      className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-r-full"
-                      style={{
-                        background:
-                          "linear-gradient(180deg, hsl(154 100% 49%), hsl(170 80% 44%))",
-                        boxShadow: "0 0 8px hsl(154 100% 49% / 0.45)",
-                      }}
+                      className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full"
+                      style={{ background: "hsl(168 55% 42%)" }}
                     />
                   )}
                   <Icon
-                    className="h-4 w-4 shrink-0 transition-colors"
-                    style={isActive ? { color: "hsl(154 100% 49%)" } : undefined}
+                    className="h-4 w-4 shrink-0"
+                    style={isActive ? { color: "hsl(168 55% 34%)" } : undefined}
                   />
                   {!isCollapsed && (
                     <span className="flex-1 truncate">{item.title}</span>
@@ -264,43 +208,37 @@ export function Sidebar({
             );
           })}
         </ul>
+
       </nav>
 
       {/* ── User / Logout ─────────────────────────────────────────── */}
-      <div
-        className="relative shrink-0 p-2"
-        style={{ borderTop: "1px solid hsl(209 60% 13%)" }}
-      >
+      <div className="relative shrink-0 p-2 border-t border-slate-100">
         {!isCollapsed && (
-          <div className="flex items-center gap-2.5 px-2 py-2 mb-1">
+          <div className="flex items-center gap-2.5 px-2 py-2 mb-1 min-w-0">
             <div
-              className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+              className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
               style={{
-                background: "hsl(154 100% 49% / 0.1)",
-                color: "hsl(154 80% 42%)",
-                border: "1px solid hsl(154 100% 49% / 0.18)",
+                background: "linear-gradient(135deg, hsl(168 55% 42%), hsl(190 50% 40%))",
+                color: "#ffffff",
               }}
             >
               {initials}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-white truncate leading-tight">
+              <p className="text-xs font-semibold truncate leading-tight text-[hsl(212_40%_18%)]">
                 {companyName || "My Account"}
               </p>
-              <p
-                className="text-[10px] truncate leading-tight"
-                style={{ color: "hsl(210 40% 40%)" }}
-              >
+              <p className="text-[10px] truncate leading-tight text-slate-500">
                 {userEmail}
               </p>
             </div>
-            {/* Live connection indicator */}
             <span
-              className="h-1.5 w-1.5 rounded-full shrink-0 animate-pulse-dot"
+              className="h-1.5 w-1.5 rounded-full shrink-0"
               style={{
-                background: "hsl(154 100% 49%)",
-                boxShadow: "0 0 5px hsl(154 100% 49% / 0.55)",
+                background: "hsl(168 55% 42%)",
+                boxShadow: "0 0 5px hsl(154 70% 42% / 0.55)",
               }}
+              title="Online"
             />
           </div>
         )}
@@ -309,13 +247,20 @@ export function Sidebar({
           onClick={handleLogout}
           title={isCollapsed ? "Sign Out" : undefined}
           className={cn(
-            "flex w-full items-center gap-2.5 rounded-lg py-2 text-sm font-medium",
-            "hover:bg-[hsl(0_72%_51%/0.07)] hover:text-[hsl(0_72%_60%)] active:scale-[0.97]",
-            isCollapsed ? "justify-center px-0" : "px-3",
-            "text-[hsl(210_40%_40%)]"
+            "flex w-full items-center gap-2.5 rounded-lg py-2 text-sm font-medium active:scale-[0.97]",
+            isCollapsed ? "justify-center px-0" : "px-3"
           )}
           style={{
-            transition: "background-color 120ms cubic-bezier(0.23,1,0.32,1), color 120ms cubic-bezier(0.23,1,0.32,1), transform 100ms cubic-bezier(0.23,1,0.32,1)",
+            color: "hsl(210 10% 42%)",
+            transition: "background-color 120ms, color 120ms, transform 100ms",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "hsl(0 80% 96%)";
+            (e.currentTarget as HTMLElement).style.color = "hsl(0 72% 48%)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "";
+            (e.currentTarget as HTMLElement).style.color = "hsl(210 10% 42%)";
           }}
         >
           <LogOut className="h-4 w-4 shrink-0" />

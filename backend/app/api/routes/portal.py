@@ -114,11 +114,17 @@ def me_exhibitor(user: Annotated[User, Depends(get_current_user)], db: Session =
         "graphics_status": ex.graphics_status,
         "description_status": ex.company_status,
         "participants_status": ex.participants_status,
-        "overall_status": "complete" if ex.fully_locked else (
+        "overall_status": "complete" if (
+            ex.fully_locked or (
+                (ex.graphics_status or "").upper() in ("APPROVED", "VALID") and
+                (ex.company_status or "").upper() in ("APPROVED", "SUBMITTED") and
+                (ex.participants_status or "").upper() in ("APPROVED", "SUBMITTED")
+            )
+        ) else (
             "in_progress" if any([
-                ex.graphics_status not in ("NOT_STARTED", None),
+                ex.graphics_status not in ("NOT_STARTED", "NOT_UPLOADED", None),
                 ex.company_status not in ("NOT_STARTED", None),
-                ex.participants_status not in ("NOT_STARTED", None),
+                ex.participants_status not in ("NOT_STARTED", "NOT_SUBMITTED", None),
             ]) else "not_started"
         ),
         "deadline_graphics": str(ev.deadline_graphics_initial) if ev.deadline_graphics_initial else None,
@@ -332,8 +338,8 @@ def _graphics_upload_allowed(ex: "Exhibitor") -> None:
     """Raise 403 if the exhibitor is not allowed to upload graphics right now."""
     if ex.section_graphics_locked:
         raise HTTPException(403, "Graphics section locked")
-    if ex.graphics_status in ("UNDER_REVIEW", "APPROVED"):
-        raise HTTPException(403, "Graphics are under review or approved — uploads locked")
+    if ex.graphics_status == "APPROVED":
+        raise HTTPException(403, "Graphics have been approved — uploads locked")
 
 
 @router.post("/me/exhibitor/graphics/{slot_key}/presign")
@@ -348,11 +354,13 @@ def me_graphics_presign(
     if not ex:
         raise HTTPException(404, "No exhibitor profile found")
     _graphics_upload_allowed(ex)
-    # Use a unique key per upload to avoid caching issues
-    s3_key = f"graphics/{ex.id}/{slot_key}/{slot_key}.tif"
     ct = _GraphicsPresignBody._normalize(body.content_type)
     if ct not in _ALLOWED_GRAPHICS_MIME:
         raise HTTPException(400, f"Unsupported content type: {ct}")
+    # Use a unique key per upload; extension depends on content type
+    _ext_map = {"image/jpeg": ".jpg", "application/pdf": ".pdf"}
+    _ext_suffix = _ext_map.get(ct, ".tif")
+    s3_key = f"graphics/{ex.id}/{slot_key}/{slot_key}{_ext_suffix}"
     result = storage.presign_put(s3_key, content_type=ct)
     return {"upload_url": result["url"], "s3_key": s3_key, "content_type": ct}
 
@@ -552,7 +560,12 @@ def _finalize_graphic_upload(
     src_ext = _os.path.splitext(original_filename)[1].lower() or ".tif"
     if src_ext not in ALLOWED_EXTENSIONS:
         src_ext = ".tif"
-    mime_type = "application/pdf" if src_ext == ".pdf" else "image/tiff"
+    if src_ext == ".pdf":
+        mime_type = "application/pdf"
+    elif src_ext in (".jpg", ".jpeg"):
+        mime_type = "image/jpeg"
+    else:
+        mime_type = "image/tiff"
 
     with tempfile.NamedTemporaryFile(suffix=src_ext, delete=True) as tmp:
         storage.download_to_path(s3_key, tmp.name)
@@ -657,6 +670,22 @@ def multipart_complete(
     return _finalize_graphic_upload(
         db, ex, body.slot_key, body.s3_key, body.original_filename, user, request, background_tasks
     )
+
+
+@router.get("/me/exhibitor/final-pdf")
+def me_final_pdf(user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Return a presigned GET URL for the final stand visualization PDF,
+    attached by the admin after graphics review."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if not ex.final_stand_pdf_s3_key:
+        return {"url": None, "filename": None, "uploaded_at": None}
+    return {
+        "url": storage.presign_get(ex.final_stand_pdf_s3_key),
+        "filename": ex.final_stand_pdf_filename,
+        "uploaded_at": ex.final_stand_pdf_uploaded_at.isoformat() if ex.final_stand_pdf_uploaded_at else None,
+    }
 
 
 @router.get("/exhibitors/{exhibitor_id}/preview")

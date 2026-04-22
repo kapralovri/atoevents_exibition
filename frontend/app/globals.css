@@ -93,28 +93,30 @@
     font-size: 16px;
     -webkit-text-size-adjust: 100%;
     scroll-behavior: smooth;
+    overflow-x: clip;
   }
 
   body {
     @apply bg-background text-foreground antialiased min-h-screen;
-    font-family: var(--font-geist), system-ui, sans-serif;
+    font-family: var(--font-body), 'Inter', system-ui, sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overflow-x: clip;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-weight: 600;
-    letter-spacing: -0.025em;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     color: hsl(var(--foreground));
-    font-family: var(--font-geist), system-ui, sans-serif;
+    font-family: var(--font-display), 'Manrope', system-ui, sans-serif;
   }
 
   /* Numbers & data: tabular by default */
   .tabular-nums,
   [data-metric],
   .font-mono {
-    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-family: var(--font-mono-ui), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
   }
 
@@ -165,8 +167,12 @@
     @apply mb-6;
   }
   .page-title {
-    @apply text-[1.6rem] font-bold tracking-tight text-foreground leading-tight;
-    letter-spacing: -0.03em;
+    font-family: var(--font-display), 'Manrope', system-ui, sans-serif;
+    font-size: 1.875rem;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: hsl(209 65% 21%);
   }
   .page-description {
     @apply text-sm text-muted-foreground mt-1 leading-relaxed;
@@ -196,7 +202,7 @@
     transform: translateY(-1px);
   }
 
-  /* ─── Liquid glass effect ──────────────────────────────────────── */
+  /* ─── Liquid glass effect (legacy, kept for backwards compat) ── */
   .glass {
     background: hsl(0 0% 100% / 0.7);
     backdrop-filter: blur(12px);
@@ -205,12 +211,163 @@
     box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.4);
   }
 
-  /* ─── Green accent bar (top of stat cards) ─────────────────────── */
+  /* ─── Glass Design System (from mockup-glass.html) ─────────────── */
+
+  /* Scene backgrounds (put on outer containers / body wrappers) */
+  .scene-light {
+    background:
+      radial-gradient(900px 520px at 15% 8%,  hsl(168 55% 55% / 0.07), transparent 60%),
+      radial-gradient(780px 460px at 88% 12%, hsl(210 60% 60% / 0.06), transparent 60%),
+      radial-gradient(720px 520px at 50% 100%, hsl(220 40% 55% / 0.05), transparent 60%),
+      linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%);
+  }
+  .scene-dark {
+    background:
+      radial-gradient(700px 420px at 20% 15%, hsl(154 100% 49% / 0.22), transparent 60%),
+      radial-gradient(580px 400px at 85% 30%, hsl(190 90% 50% / 0.20), transparent 60%),
+      radial-gradient(640px 520px at 50% 100%, hsl(260 70% 50% / 0.18), transparent 60%),
+      linear-gradient(160deg, hsl(209 70% 10%) 0%, hsl(220 45% 8%) 100%);
+  }
+
+  /* Glass surfaces — frosted cards */
+  .glass-light {
+    background: linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.82) 100%);
+    backdrop-filter: blur(14px) saturate(1.1);
+    -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    border: 1px solid rgba(226,232,240,0.9);
+    box-shadow:
+      0 1px 2px rgba(15,23,42,0.04),
+      0 4px 12px rgba(15,23,42,0.04),
+      0 12px 32px rgba(15,23,42,0.05);
+  }
+  .glass-dark {
+    background: linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 100%);
+    backdrop-filter: blur(22px) saturate(1.4);
+    -webkit-backdrop-filter: blur(22px) saturate(1.4);
+    border: 1px solid rgba(255,255,255,0.22);
+    box-shadow:
+      0 2.8px 2.2px rgba(0,0,0,0.034),
+      0 6.7px 5.3px rgba(0,0,0,0.05),
+      0 12.5px 10px rgba(0,0,0,0.06),
+      0 22.3px 17.9px rgba(0,0,0,0.075),
+      0 41.8px 33.4px rgba(0,0,0,0.09),
+      0 100px 80px rgba(0,0,0,0.13);
+  }
+
+  /* Gradient rim (use on `position:relative` element with glass-light/dark) */
+  .border-gradient-light { position: relative; }
+  .border-gradient-light::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit;
+    padding: 1px; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(203,213,225,0.4) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+  }
+  .border-gradient-dark { position: relative; }
+  .border-gradient-dark::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit;
+    padding: 1px; pointer-events: none;
+    background: linear-gradient(135deg, rgba(255,255,255,0.55), rgba(0,252,144,0.45) 50%, transparent 85%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+  }
+
+  /* Gradient text (mint & white) */
+  .gradient-text-mint {
+    background: linear-gradient(135deg, hsl(168 55% 38%), hsl(190 50% 42%));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .gradient-text-white {
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255,255,255,0.65) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  /* Dividers */
+  .divider-light {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(8,24,48,0.10) 20%, rgba(8,24,48,0.14) 50%, rgba(8,24,48,0.10) 80%, transparent);
+  }
+  .divider-dark {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18) 20%, rgba(255,255,255,0.32) 50%, rgba(255,255,255,0.18) 80%, transparent);
+  }
+
+  /* Glow + pulse */
+  .glow-mint {
+    box-shadow: 0 6px 20px hsl(168 55% 45% / 0.22), 0 0 0 1px hsl(168 55% 45% / 0.18);
+  }
+  .pulse-dot { position: relative; }
+  .pulse-dot::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 9999px;
+    background: hsl(154 100% 49% / 0.35); animation: pulse-ring 1.8s infinite;
+  }
+
+  /* Decorative blobs (place inside overflow-hidden scene container) */
+  .blob {
+    position: absolute; border-radius: 9999px;
+    filter: blur(72px); pointer-events: none;
+  }
+
+  /* Chip / badge */
+  .chip {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
+    text-transform: uppercase; padding: 0.25rem 0.55rem; border-radius: 9999px;
+    font-family: var(--font-display), 'Manrope', system-ui, sans-serif;
+  }
+
+  /* Small 44×44 tile (event thumbnails, gradient-filled) */
+  .tile {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display), 'Manrope', system-ui, sans-serif;
+    font-weight: 800; font-size: 14px; color: white;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.18), inset 0 -2px 0 rgba(0,0,0,0.18);
+  }
+
+  /* Brand mark 36px */
+  .brand-mark {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: hsl(209 65% 21%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 24px hsl(209 70% 10% / 0.35),
+                inset 0 0 0 1px hsl(154 100% 49% / 0.25);
+  }
+
+  /* Section eyebrow label (above titles) */
+  .section-eyebrow {
+    font-size: 10px; font-weight: 800;
+    letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.6;
+    font-family: var(--font-display), 'Manrope', system-ui, sans-serif;
+  }
+
+  /* ─── Global glass upgrade for existing cards ──────────────────
+     Any element styled with Tailwind `.bg-card` or the shadcn
+     <Card> component automatically becomes a frosted-glass surface,
+     matching mockup-glass.html. No per-page refactor needed.      */
+  .bg-card,
+  [data-slot="card"],
+  .card-elevated {
+    background: #ffffff !important;
+    border: 1px solid hsl(214 20% 90%) !important;
+    box-shadow:
+      0 1px 2px rgba(15,23,42,0.04),
+      0 4px 12px rgba(15,23,42,0.04) !important;
+  }
+
+  /* Inline-styled cards that hard-code the card HSL token */
+  [style*="hsl(var(--card))"] {
+    background: #ffffff !important;
+  }
+
+  /* ─── Accent bar (top of stat cards) ─────────────────────── */
   .card-accent-bar::before {
     content: "";
     display: block;
     height: 2px;
-    background: linear-gradient(90deg, hsl(154 100% 49%), hsl(170 80% 44%));
+    background: linear-gradient(90deg, hsl(168 55% 45%), hsl(190 50% 50%));
     border-radius: var(--radius) var(--radius) 0 0;
     margin: -1px -1px 0;
   }
@@ -218,8 +375,8 @@
   /* ─── Spotlight dot ────────────────────────────────────────────── */
   .dot-live {
     @apply h-2 w-2 rounded-full;
-    background: hsl(154 100% 49%);
-    box-shadow: 0 0 0 3px hsl(154 100% 49% / 0.18);
+    background: hsl(168 55% 45%);
+    box-shadow: 0 0 0 3px hsl(168 55% 45% / 0.18);
   }
 }
 
@@ -248,6 +405,11 @@
   @keyframes pulse-dot {
     0%, 100% { opacity: 1; transform: scale(1); }
     50%       { opacity: 0.6; transform: scale(0.85); }
+  }
+  @keyframes pulse-ring {
+    0%   { transform: scale(0.6); opacity: 0.8; }
+    80%  { transform: scale(1.8); opacity: 0; }
+    100% { transform: scale(1.8); opacity: 0; }
   }
 
   .animate-fade-up   { animation: fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }

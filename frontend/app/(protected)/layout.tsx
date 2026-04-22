@@ -49,7 +49,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
 
   if (!userRole) {
     return (
-      <div className="flex h-screen items-center justify-center" style={{ background: "hsl(213 25% 97%)" }}>
+      <div className="flex h-screen items-center justify-center scene-light">
         <div className="flex flex-col items-center gap-4">
           <div className="h-12 w-12 rounded-2xl flex items-center justify-center font-black text-lg animate-pulse"
             style={{ background: "hsl(209 65% 21%)", color: "hsl(154 100% 49%)" }}>
@@ -68,16 +68,35 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     );
   }
 
-  const sidebarW = collapsed ? "ml-16" : "ml-64";
+  // Sidebar is floating (left-4, w-[72] or w-[240]) — leave room + 16px gap
+  const sidebarW = collapsed ? "ml-[104px]" : "ml-[272px]";
 
   return (
-    <div
-      className="flex h-screen"
-      style={{
-        background:
-          "radial-gradient(ellipse at 70% 0%, hsl(154 100% 49% / 0.04) 0%, transparent 50%), hsl(213 25% 97%)",
-      }}
-    >
+    <div className="flex h-screen scene-light relative overflow-hidden">
+      {/* ── Subtle ambient blobs (very low opacity) ───────────────── */}
+      <div
+        aria-hidden
+        className="blob"
+        style={{
+          width: 620,
+          height: 620,
+          top: -220,
+          left: -180,
+          background: "hsl(168 55% 55% / 0.08)",
+        }}
+      />
+      <div
+        aria-hidden
+        className="blob"
+        style={{
+          width: 500,
+          height: 500,
+          bottom: -160,
+          right: -120,
+          background: "hsl(212 50% 55% / 0.07)",
+        }}
+      />
+
       <Sidebar
         userRole={userRole}
         userEmail={userEmail}
@@ -85,8 +104,8 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
         collapsed={collapsed}
         onCollapsedChange={setCollapsed}
       />
-      <main className={`flex-1 ${sidebarW} overflow-auto transition-all duration-300`}>
-        <div className="max-w-5xl mx-auto px-6 py-6 animate-fade-up">
+      <main className={`relative flex-1 min-w-0 ${sidebarW} overflow-y-auto overflow-x-hidden transition-all duration-300`}>
+        <div className="px-4 md:px-8 py-6 md:py-8 mx-auto max-w-[1440px] animate-fade-up">
           {children}
         </div>
       </main>

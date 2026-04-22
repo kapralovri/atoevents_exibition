@@ -196,9 +196,9 @@ export default function LoginPage() {
                 autoComplete="email"
                 className="h-12 text-sm"
                 style={{
-                  background: "hsl(209 65% 21% / 0.15)",
-                  border: "1px solid hsl(209 65% 35% / 0.3)",
-                  color: "#f0f0f0",
+                  background: "rgba(255,255,255,0.97)",
+                  border: "1px solid hsl(209 65% 35% / 0.4)",
+                  color: "#0f172a",
                 }}
               />
             </div>
@@ -220,9 +220,9 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   className="h-12 pr-10 text-sm"
                   style={{
-                    background: "hsl(209 65% 21% / 0.15)",
-                    border: "1px solid hsl(209 65% 35% / 0.3)",
-                    color: "#f0f0f0",
+                    background: "rgba(255,255,255,0.97)",
+                    border: "1px solid hsl(209 65% 35% / 0.4)",
+                    color: "#0f172a",
                   }}
                 />
                 <button

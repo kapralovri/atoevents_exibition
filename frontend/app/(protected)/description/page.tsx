@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -131,6 +132,7 @@ function RequestModal({
 
 // ── Main Page ────────────────────────────────────────────────────────────────
 export default function DescriptionPage() {
+  const router = useRouter();
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<string>("not_submitted");
   const [adminComment, setAdminComment] = useState<string | null>(null);
@@ -245,8 +247,9 @@ export default function DescriptionPage() {
         body: JSON.stringify({ company_description: description, website }),
       });
       await apiFetch("/portal/me/exhibitor/description/submit", { method: "POST" });
-      setStatus("submitted");
-      toast.success("Description submitted successfully");
+      setStatus("UNDER_REVIEW");
+      toast.success("Description submitted — under review");
+      router.push("/tasks");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Submission failed");
     } finally {

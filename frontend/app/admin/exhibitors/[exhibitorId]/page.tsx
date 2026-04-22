@@ -107,6 +107,66 @@ export default function AdminExhibitorDetailPage() {
   const [eventInventory, setEventInventory] = useState<{ id: string; package: string; area_m2: number; configuration: string; total: number; booked: number; available: number; is_full: boolean }[]>([]);
   const [isSavingStand, setIsSavingStand] = useState(false);
 
+  // Final stand PDF (admin uploads)
+  const [finalPdf, setFinalPdf] = useState<{ url: string | null; filename: string | null; uploaded_at: string | null }>({ url: null, filename: null, uploaded_at: null });
+  const [finalPdfUploading, setFinalPdfUploading] = useState(false);
+  const [finalPdfProgress, setFinalPdfProgress] = useState(0);
+
+  const refreshFinalPdf = async () => {
+    try {
+      const data = await apiFetch<{ url: string | null; filename: string | null; uploaded_at: string | null }>(
+        `/admin/exhibitors/${exhibitorId}/final-pdf`
+      );
+      setFinalPdf(data);
+    } catch { /* ignore */ }
+  };
+
+  const handleFinalPdfUpload = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      toast.error("Only PDF files are accepted");
+      return;
+    }
+    if (file.size > 100 * 1024 * 1024) {
+      toast.error("PDF exceeds 100 MB limit");
+      return;
+    }
+    setFinalPdfUploading(true);
+    setFinalPdfProgress(0);
+    try {
+      const { upload_url, s3_key } = await apiFetch<{ upload_url: string; s3_key: string }>(
+        `/admin/exhibitors/${exhibitorId}/final-pdf/presign`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ exhibitor_id: Number(exhibitorId), filename: file.name, content_type: "application/pdf" }),
+        }
+      );
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) setFinalPdfProgress(Math.round((e.loaded / e.total) * 100));
+        });
+        xhr.addEventListener("load", () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed: ${xhr.status}`))));
+        xhr.addEventListener("error", () => reject(new Error("Network error")));
+        xhr.open("PUT", upload_url);
+        xhr.setRequestHeader("Content-Type", "application/pdf");
+        xhr.send(file);
+      });
+      await apiFetch(`/admin/exhibitors/${exhibitorId}/final-pdf/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exhibitor_id: Number(exhibitorId), s3_key, filename: file.name }),
+      });
+      toast.success("Final stand PDF attached");
+      await refreshFinalPdf();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setFinalPdfUploading(false);
+      setFinalPdfProgress(0);
+    }
+  };
+
   useEffect(() => {
     async function fetchData() {
       try {
@@ -116,6 +176,7 @@ export default function AdminExhibitorDetailPage() {
         ]);
         setExhibitor(exhibitorData);
         setGraphics(graphicsData);
+        refreshFinalPdf();
         // Pre-load event inventory for stand editing
         if (exhibitorData.event_id) {
           try {
@@ -735,6 +796,115 @@ export default function AdminExhibitorDetailPage() {
                   )}
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          {/* ── Final stand PDF (admin attaches after review) ─────── */}
+          <Card className="card-elevated">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <FileText className="h-4 w-4" style={{ color: "hsl(154 70% 30%)" }} />
+                    Final Stand Visualization (PDF)
+                  </CardTitle>
+                  <CardDescription className="mt-1 text-xs">
+                    Upload the final PDF showing how the stand will look. The exhibitor will see it inline before signing.
+                  </CardDescription>
+                </div>
+                {finalPdf.url && (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                    style={{ background: "hsl(154 80% 94%)", color: "hsl(154 60% 26%)", border: "1px solid hsl(154 60% 78%)" }}
+                  >
+                    <CheckCircle2 className="h-3 w-3" />
+                    Attached
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {finalPdf.url && (
+                <div
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5"
+                  style={{ background: "hsl(210 18% 96%)", border: "1px solid hsl(var(--border))" }}
+                >
+                  <FileText className="h-4 w-4 shrink-0" style={{ color: "hsl(154 70% 30%)" }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold truncate" style={{ color: "hsl(209 65% 22%)" }}>
+                      {finalPdf.filename ?? "stand.pdf"}
+                    </p>
+                    {finalPdf.uploaded_at && (
+                      <p className="text-[10px] mt-0.5" style={{ color: "hsl(210 12% 50%)" }}>
+                        Uploaded {new Date(finalPdf.uploaded_at).toLocaleString("en-GB")}
+                      </p>
+                    )}
+                  </div>
+                  <a
+                    href={finalPdf.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold rounded-lg px-2.5 py-1.5"
+                    style={{
+                      background: "hsl(209 65% 21% / 0.08)",
+                      color: "hsl(209 65% 28%)",
+                      border: "1px solid hsl(209 65% 21% / 0.15)",
+                    }}
+                  >
+                    <Download className="h-3 w-3" />
+                    View
+                  </a>
+                </div>
+              )}
+              <div>
+                <input
+                  type="file"
+                  id="final-pdf-upload"
+                  className="hidden"
+                  accept=".pdf,application/pdf"
+                  disabled={finalPdfUploading}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleFinalPdfUpload(f);
+                    e.target.value = "";
+                  }}
+                />
+                <label
+                  htmlFor="final-pdf-upload"
+                  className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed p-5 cursor-pointer text-center transition-all duration-200"
+                  style={{
+                    borderColor: finalPdfUploading ? "hsl(154 100% 49%)" : "hsl(var(--border))",
+                    background: finalPdfUploading ? "hsl(154 100% 49% / 0.05)" : "hsl(213 20% 98%)",
+                  }}
+                >
+                  {finalPdfUploading ? (
+                    <div className="w-full space-y-2 py-1">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span style={{ color: "hsl(154 60% 35%)" }}>Uploading…</span>
+                        <span style={{ color: "hsl(154 60% 35%)" }}>{finalPdfProgress}%</span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(154 100% 49% / 0.15)" }}>
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${finalPdfProgress}%`,
+                            background: "hsl(154 100% 49%)",
+                            transition: "width 80ms linear",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <FileText className="h-6 w-6" style={{ color: "hsl(209 65% 38%)" }} />
+                      <p className="text-sm font-semibold text-foreground">
+                        {finalPdf.url ? "Replace final stand PDF" : "Upload final stand PDF"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">PDF only · max 100 MB</p>
+                    </>
+                  )}
+                </label>
+              </div>
             </CardContent>
           </Card>
 

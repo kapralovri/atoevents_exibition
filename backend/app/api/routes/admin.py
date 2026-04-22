@@ -157,9 +157,12 @@ def _random_password(length: int = 14) -> str:
 
 def _is_exhibitor_complete(ex: Exhibitor) -> bool:
     """True when all three submission sections are in a terminal-success state."""
-    graphics_done = ex.graphics_status in ("APPROVED", "VALID")
-    company_done = ex.company_status in ("APPROVED", "SUBMITTED")
-    participants_done = ex.participants_status in ("SUBMITTED",)
+    gs = (ex.graphics_status or "").upper()
+    cs = (ex.company_status or "").upper()
+    ps = (ex.participants_status or "").upper()
+    graphics_done = gs in ("APPROVED", "VALID")
+    company_done = cs in ("APPROVED", "SUBMITTED")
+    participants_done = ps in ("SUBMITTED", "APPROVED")
     return graphics_done and company_done and participants_done
 
 
@@ -284,6 +287,51 @@ def update_event(event_id: int, body: EventUpdate, db: Session = Depends(get_db)
         setattr(ev, k, v)
     db.commit()
     return {"status": "ok"}
+
+
+@router.delete("/events/{event_id}", dependencies=[Depends(require_admin)])
+def delete_event(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+) -> Dict[str, Any]:
+    """Delete an event and all its exhibitors / documents. Logs to audit trail."""
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Event not found")
+
+    event_name = ev.name
+    exhibitor_ids = [ex.id for ex in db.query(Exhibitor).filter(Exhibitor.event_id == event_id).all()]
+
+    # Cascade delete child records
+    db.query(GraphicUpload).filter(
+        GraphicUpload.exhibitor_id.in_(exhibitor_ids)
+    ).delete(synchronize_session=False)
+    db.query(Participant).filter(
+        Participant.exhibitor_id.in_(exhibitor_ids)
+    ).delete(synchronize_session=False)
+    db.query(CompanyProfile).filter(
+        CompanyProfile.exhibitor_id.in_(exhibitor_ids)
+    ).delete(synchronize_session=False)
+    db.query(Exhibitor).filter(Exhibitor.event_id == event_id).delete(synchronize_session=False)
+    db.query(EventDocument).filter(EventDocument.event_id == event_id).delete(synchronize_session=False)
+    db.delete(ev)
+
+    log_event(
+        db,
+        user_id=admin.id,
+        event_type="admin_delete_event",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        payload={
+            "event_id": event_id,
+            "event_name": event_name,
+            "exhibitors_deleted": len(exhibitor_ids),
+        },
+    )
+    db.commit()
+    return {"status": "deleted", "event_id": event_id, "event_name": event_name}
 
 
 @router.get("/events/{event_id}/exhibitors", dependencies=[Depends(require_admin)])
@@ -431,6 +479,63 @@ def complete_backdrop(body: BackdropCompleteBody, db: Session = Depends(get_db))
     ev.backdrop_s3_keys = keys
     db.commit()
     return {"status": "ok"}
+
+
+# ── Final stand PDF (admin attaches after graphics review) ────────────────────
+
+class FinalPdfPresignBody(BaseModel):
+    exhibitor_id: int
+    filename: str = "stand.pdf"
+    content_type: str = "application/pdf"
+
+
+class FinalPdfCompleteBody(BaseModel):
+    exhibitor_id: int
+    s3_key: str
+    filename: str
+
+
+@router.post("/exhibitors/{exhibitor_id}/final-pdf/presign", dependencies=[Depends(require_admin)])
+def presign_final_pdf(exhibitor_id: int, body: FinalPdfPresignBody, db: Session = Depends(get_db)) -> Dict[str, str]:
+    ex = db.query(Exhibitor).filter(Exhibitor.id == exhibitor_id).first()
+    if not ex:
+        raise HTTPException(404, "Exhibitor not found")
+    safe_name = body.filename.replace("/", "_")[:200]
+    key = storage.new_upload_key(f"exhibitors/{exhibitor_id}/final_pdf", safe_name)
+    p = storage.presign_put(key, body.content_type)
+    return {"upload_url": p["url"], "s3_key": key}
+
+
+@router.post("/exhibitors/{exhibitor_id}/final-pdf/complete", dependencies=[Depends(require_admin)])
+def complete_final_pdf(exhibitor_id: int, body: FinalPdfCompleteBody, db: Session = Depends(get_db)) -> Dict[str, str]:
+    ex = db.query(Exhibitor).filter(Exhibitor.id == exhibitor_id).first()
+    if not ex:
+        raise HTTPException(404, "Exhibitor not found")
+    # Drop any previous final PDF from storage
+    if ex.final_stand_pdf_s3_key and ex.final_stand_pdf_s3_key != body.s3_key:
+        try:
+            storage.delete_object(ex.final_stand_pdf_s3_key)
+        except Exception:  # noqa: BLE001
+            pass
+    ex.final_stand_pdf_s3_key = body.s3_key
+    ex.final_stand_pdf_filename = body.filename
+    ex.final_stand_pdf_uploaded_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/exhibitors/{exhibitor_id}/final-pdf", dependencies=[Depends(require_admin)])
+def get_final_pdf(exhibitor_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    ex = db.query(Exhibitor).filter(Exhibitor.id == exhibitor_id).first()
+    if not ex:
+        raise HTTPException(404, "Exhibitor not found")
+    if not ex.final_stand_pdf_s3_key:
+        return {"url": None, "filename": None, "uploaded_at": None}
+    return {
+        "url": storage.presign_get(ex.final_stand_pdf_s3_key),
+        "filename": ex.final_stand_pdf_filename,
+        "uploaded_at": ex.final_stand_pdf_uploaded_at.isoformat() if ex.final_stand_pdf_uploaded_at else None,
+    }
 
 
 # ── Exhibitor endpoints ───────────────────────────────────────────────────────

@@ -67,17 +67,21 @@ export default function DashboardPage() {
     fetchData();
   }, []);
 
+  const gs = data?.graphics_status?.toLowerCase() ?? "";
+  const ds = data?.description_status?.toLowerCase() ?? "";
+  const ps = data?.participants_status?.toLowerCase() ?? "";
+
   const allApproved =
-    data?.graphics_status === "approved" &&
-    (data?.description_status === "approved" || data?.description_status === "submitted") &&
-    (data?.participants_status === "submitted" || data?.participants_status === "approved");
+    ["approved", "valid"].includes(gs) &&
+    ["approved", "submitted"].includes(ds) &&
+    ["approved", "submitted"].includes(ps);
 
   const progress = (() => {
     if (!data) return 0;
     const done = [
-      data.graphics_status === "approved",
-      data.description_status === "submitted" || data.description_status === "approved",
-      data.participants_status === "submitted" || data.participants_status === "approved",
+      ["approved", "valid"].includes(gs),
+      ["approved", "submitted"].includes(ds),
+      ["approved", "submitted"].includes(ps),
     ].filter(Boolean).length;
     return Math.round((done / 3) * 100);
   })();
@@ -90,7 +94,7 @@ export default function DashboardPage() {
       ]
     : [];
 
-  const approvedCount = graphicsElements.filter((g) => g.status === "approved").length;
+  const approvedCount = graphicsElements.filter((g) => g.status?.toLowerCase() === "approved").length;
   const requiredCount = graphicsElements.filter((g) => g.required).length;
 
   // SVG circle progress
@@ -240,7 +244,7 @@ export default function DashboardPage() {
 
               <div className="space-y-1">
                 <p className="text-sm font-semibold text-foreground">
-                  {tasks.filter((t) => t.status === "approved" || t.status === "submitted").length}{" "}
+                  {tasks.filter((t) => ["approved", "submitted", "valid"].includes(t.status?.toLowerCase() ?? "")).length}{" "}
                   <span className="text-muted-foreground font-normal">of 3</span>
                 </p>
                 <p className="text-xs text-muted-foreground">tasks submitted</p>
@@ -322,9 +326,9 @@ export default function DashboardPage() {
           >
             {tasks.map((task, i) => {
               const Icon = task.icon;
-              const isComplete =
-                task.status === "approved" || task.status === "submitted";
-              const isReview = task.status === "under_review";
+              const statusLower = task.status?.toLowerCase() ?? "";
+              const isComplete = ["approved", "submitted", "valid"].includes(statusLower);
+              const isReview = statusLower === "under_review";
 
               return (
                 <Link
@@ -504,8 +508,9 @@ export default function DashboardPage() {
           <div className="p-6">
             <div className="grid gap-2 sm:grid-cols-2">
               {graphicsElements.map((element) => {
-                const isApproved = element.status === "approved";
-                const isReview   = element.status === "under_review";
+                const elStatus = element.status?.toLowerCase() ?? "";
+                const isApproved = elStatus === "approved";
+                const isReview   = elStatus === "under_review";
                 return (
                   <div
                     key={element.name}

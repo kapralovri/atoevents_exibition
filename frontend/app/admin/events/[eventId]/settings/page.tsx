@@ -19,7 +19,10 @@ import {
   AlertTriangle,
   Loader2,
   Layers,
+  ShieldAlert,
+  X,
 } from "lucide-react";
+
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -154,6 +157,12 @@ export default function EventSettingsPage() {
   // PDF arrival schedule
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const [pdfUploading, setPdfUploading] = useState(false);
+  const [pdfDoc, setPdfDoc] = useState<{ title: string; filename?: string } | null>(null);
+
+  // Delete event
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // ── Load ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -161,7 +170,8 @@ export default function EventSettingsPage() {
     Promise.all([
       apiFetch<Record<string, unknown>>(`/admin/events/${eventId}`),
       apiFetch<AvailabilityItem[]>(`/admin/events/${eventId}/stand-availability`).catch(() => []),
-    ]).then(([ev, avail]) => {
+      apiFetch<Array<{ doc_type: string; title: string; original_filename?: string }>>(`/admin/events/${eventId}/documents`).catch(() => []),
+    ]).then(([ev, avail, docs]) => {
       const d = (k: string) => ((ev[k] as string) || "");
       setForm({
         name:                       d("name"),
@@ -177,6 +187,9 @@ export default function EventSettingsPage() {
         stand_inventory:            (ev.stand_inventory as StandInventoryItem[]) ?? [],
       });
       setAvailability(avail as AvailabilityItem[]);
+      const schedule = (docs as Array<{ doc_type: string; title: string; original_filename?: string }>)
+        .find((d) => d.doc_type === "setup_schedule");
+      if (schedule) setPdfDoc({ title: schedule.title, filename: schedule.original_filename });
     }).catch(() => toast.error("Failed to load event settings"));
   }, [eventId]);
 
@@ -282,10 +295,25 @@ export default function EventSettingsPage() {
         body: JSON.stringify({ s3_key, doc_type, title, version_label }),
       });
       toast.success("PDF uploaded");
+      setPdfDoc({ title: "Arrival Schedule", filename: file.name });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "PDF upload failed");
     } finally {
       setPdfUploading(false);
+    }
+  }
+
+  // ── Delete event ────────────────────────────────────────────────────────────
+  async function handleDeleteEvent() {
+    if (!form) return;
+    setIsDeleting(true);
+    try {
+      await apiFetch(`/admin/events/${eventId}`, { method: "DELETE" });
+      toast.success(`Event "${form.name}" deleted`);
+      router.push("/admin/events");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+      setIsDeleting(false);
     }
   }
 
@@ -331,10 +359,11 @@ export default function EventSettingsPage() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   const navItems = [
-    { id: "basic",     label: "Basic Details",    icon: FileText  },
-    { id: "deadlines", label: "Deadlines",         icon: Clock     },
-    { id: "inventory", label: "Stand Inventory",   icon: Layers    },
-    { id: "documents", label: "Documents",         icon: ImageIcon },
+    { id: "basic",     label: "Basic Details",    icon: FileText   },
+    { id: "deadlines", label: "Deadlines",         icon: Clock      },
+    { id: "inventory", label: "Stand Inventory",   icon: Layers     },
+    { id: "documents", label: "Documents",         icon: ImageIcon  },
+    { id: "danger",    label: "Danger Zone",       icon: ShieldAlert },
   ];
 
   return (
@@ -367,14 +396,25 @@ export default function EventSettingsPage() {
       <div className="max-w-[1400px] mx-auto px-6 py-8 flex gap-8">
         {/* ── Left nav ── */}
         <nav className="hidden lg:flex flex-col gap-1 w-52 shrink-0 sticky top-24 self-start">
-          {navItems.map(({ id, label, icon: Icon }) => (
-            <a key={id} href={`#${id}`}
-              className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-muted"
-              style={{ color: "hsl(209 50% 35%)" }}>
-              <Icon className="h-4 w-4 shrink-0" />
-              {label}
-            </a>
-          ))}
+          {navItems.map(({ id, label, icon: Icon }) => {
+            const isDanger = id === "danger";
+            return (
+              <a key={id} href={`#${id}`}
+                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+                style={{
+                  color: isDanger ? "hsl(0 72% 51%)" : "hsl(209 50% 35%)",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.background = isDanger ? "hsl(0 72% 51% / 0.06)" : "hsl(213 20% 95%)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.background = "transparent";
+                }}>
+                <Icon className="h-4 w-4 shrink-0" />
+                {label}
+              </a>
+            );
+          })}
         </nav>
 
         {/* ── Content ── */}
@@ -649,28 +689,178 @@ export default function EventSettingsPage() {
 
           {/* ─────────────── 4. DOCUMENTS ─────────────── */}
           <SectionCard id="documents" icon={FileText} title="4. Documents">
-            <div>
+            <div className="space-y-3">
               <FieldLabel>Arrival Schedule (PDF)</FieldLabel>
-              <p className="text-xs text-muted-foreground mt-1 mb-3">
+              <p className="text-xs text-muted-foreground">
                 Upload the setup/arrival schedule PDF for exhibitors.
               </p>
+
+              {/* Existing file badge */}
+              {pdfDoc && (
+                <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+                  style={{ background: "hsl(154 80% 94%)", border: "1px solid hsl(154 60% 78%)" }}>
+                  <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: "hsl(154 60% 28%)" }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold" style={{ color: "hsl(154 60% 22%)" }}>
+                      {pdfDoc.title}
+                    </p>
+                    {pdfDoc.filename && (
+                      <p className="text-xs truncate" style={{ color: "hsl(154 50% 35%)" }}>
+                        {pdfDoc.filename}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => pdfInputRef.current?.click()}
+                    disabled={pdfUploading}
+                    className="shrink-0 text-xs font-medium rounded-lg px-2.5 py-1 transition-colors disabled:opacity-60"
+                    style={{ background: "hsl(154 60% 88%)", color: "hsl(154 60% 22%)" }}>
+                    Replace
+                  </button>
+                </div>
+              )}
+
               <input type="file" accept=".pdf,application/pdf" ref={pdfInputRef} className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePdfUpload(f); }} />
-              <button
-                onClick={() => pdfInputRef.current?.click()}
-                disabled={pdfUploading}
-                className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium border transition-colors hover:bg-muted/50 disabled:opacity-60"
-                style={{ borderColor: "hsl(213 20% 82%)", color: "hsl(209 65% 38%)" }}>
-                {pdfUploading
-                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</>
-                  : <><FileText className="h-4 w-4" /> Upload PDF</>
-                }
-              </button>
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePdfUpload(f); if (e.target) e.target.value = ""; }} />
+
+              {!pdfDoc && (
+                <button
+                  onClick={() => pdfInputRef.current?.click()}
+                  disabled={pdfUploading}
+                  className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium border transition-colors hover:bg-muted/50 disabled:opacity-60"
+                  style={{ borderColor: "hsl(213 20% 82%)", color: "hsl(209 65% 38%)" }}>
+                  {pdfUploading
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</>
+                    : <><FileText className="h-4 w-4" /> Upload PDF</>
+                  }
+                </button>
+              )}
+              {pdfDoc && pdfUploading && (
+                <div className="flex items-center gap-2 text-xs" style={{ color: "hsl(209 65% 38%)" }}>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading new version…
+                </div>
+              )}
             </div>
           </SectionCard>
 
+          {/* ─────────────── 5. DANGER ZONE ─────────────── */}
+          <section id="danger" className="scroll-mt-24">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0"
+                style={{ background: "hsl(0 72% 51% / 0.08)" }}>
+                <ShieldAlert className="h-3.5 w-3.5 text-red-500" />
+              </div>
+              <h2 className="text-sm font-semibold text-red-600">Danger Zone</h2>
+            </div>
+            <div className="rounded-2xl border border-red-200 bg-red-50/50 p-6">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-sm font-semibold text-red-700">Delete this event</p>
+                  <p className="text-xs text-red-500 mt-1 max-w-md">
+                    Permanently removes the event and all associated exhibitors, graphics, participants, and documents.
+                    This action cannot be undone.
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setDeleteConfirmName(""); setShowDeleteModal(true); }}
+                  className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold shrink-0 transition-all hover:opacity-90 active:scale-[0.98]"
+                  style={{ background: "hsl(0 72% 51%)", color: "white" }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete Event
+                </button>
+              </div>
+            </div>
+          </section>
+
         </div>{/* end content */}
       </div>{/* end layout */}
+
+      {/* ── Delete confirmation modal ── */}
+      {showDeleteModal && form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(15,23,42,0.55)", backdropFilter: "blur(4px)" }}>
+          <div className="w-full max-w-md rounded-2xl bg-white border border-border shadow-2xl p-6 space-y-5 animate-fade-up">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ background: "hsl(0 72% 51% / 0.1)" }}>
+                  <ShieldAlert className="h-5 w-5 text-red-500" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Delete Event</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">This action is permanent and cannot be undone.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowDeleteModal(false)}
+                className="h-7 w-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors shrink-0 mt-0.5">
+                <X className="h-4 w-4 text-muted-foreground" />
+              </button>
+            </div>
+
+            {/* Warning box */}
+            <div className="rounded-xl p-4 space-y-1.5"
+              style={{ background: "hsl(0 72% 51% / 0.06)", border: "1px solid hsl(0 72% 51% / 0.2)" }}>
+              <div className="flex items-center gap-2 text-xs font-semibold text-red-600">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                The following will be permanently deleted:
+              </div>
+              <ul className="text-xs text-red-500 space-y-0.5 pl-5 list-disc">
+                <li>All registered exhibitors and their company profiles</li>
+                <li>All graphic uploads and participant records</li>
+                <li>All event documents and stand inventory</li>
+                <li>Audit log entries remain for compliance</li>
+              </ul>
+            </div>
+
+            {/* Confirmation input */}
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Type <span className="font-semibold text-foreground">{form.name}</span> to confirm deletion:
+              </p>
+              <input
+                autoFocus
+                type="text"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={form.name}
+                className="w-full h-9 text-sm rounded-lg border border-input bg-background px-3 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-0"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && deleteConfirmName === form.name) handleDeleteEvent();
+                  if (e.key === "Escape") setShowDeleteModal(false);
+                }}
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 rounded-xl px-4 py-2 text-sm font-medium border border-border hover:bg-muted transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteEvent}
+                disabled={deleteConfirmName !== form.name || isDeleting}
+                className="flex-1 flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  background: deleteConfirmName === form.name && !isDeleting
+                    ? "hsl(0 72% 51%)"
+                    : "hsl(0 72% 51% / 0.5)",
+                  color: "white",
+                }}
+              >
+                {isDeleting
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Deleting…</>
+                  : <><Trash2 className="h-3.5 w-3.5" /> Delete permanently</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
