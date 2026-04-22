@@ -589,7 +589,7 @@ export default function GraphicsPage() {
               Waiting for administrator review
             </p>
             <p className="text-xs mt-0.5" style={{ color: "hsl(38 60% 32%)" }}>
-              Your banners have been uploaded. Once the administrator verifies them and attaches the final stand PDF, you'll be able to review and approve here.
+              Your banners have been uploaded. Once the administrator verifies them and attaches the final stand PDF, you&apos;ll be able to review and approve here.
             </p>
           </div>
         </div>
