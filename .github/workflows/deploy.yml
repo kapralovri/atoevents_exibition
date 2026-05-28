@@ -32,4 +32,5 @@ jobs:
             cp /tmp/expo_deploy.env .env
 
             docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+            docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
             docker image prune -f
