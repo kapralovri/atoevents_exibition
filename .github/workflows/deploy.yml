@@ -18,10 +18,18 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
+          port: ${{ secrets.SSH_PORT }}
           script: |
             set -e
             cd ${{ secrets.DEPLOY_PATH }}
+
+            # Preserve production .env (not in git)
+            cp .env /tmp/expo_deploy.env
+
             git pull origin main
+
+            # Restore .env after pull
+            cp /tmp/expo_deploy.env .env
+
             docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
             docker image prune -f
