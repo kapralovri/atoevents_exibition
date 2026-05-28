@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
 
     cors_origins: str = "http://localhost:3000"
+    frontend_url: str = "http://localhost:3000"
 
     smtp_host: str = ""
     smtp_port: int = 587

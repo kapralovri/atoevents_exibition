@@ -35,7 +35,12 @@ from app.schemas.portal import (
 from app.services import storage
 from app.services.audit_service import log_event
 from app.services.deadlines import refresh_exhibitor_locks
-from app.services.email_service import notify_admin_equipment, notify_admin_new_upload, send_email
+from app.services.email_service import (
+    notify_admin_equipment,
+    notify_admin_new_upload,
+    notify_admin_participants_submitted,
+    send_email,
+)
 from app.services.graphics_validation import (
     ALLOWED_EXTENSIONS,
     build_preview_jpeg_from_path,
@@ -919,6 +924,7 @@ def delete_participant(
 @router.post("/exhibitors/{exhibitor_id}/participants/submit")
 def submit_participants(
     exhibitor_id: int,
+    background_tasks: BackgroundTasks,
     user: Annotated[User, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:
@@ -927,6 +933,17 @@ def submit_participants(
         raise HTTPException(403, "Locked")
     ex.participants_status = "SUBMITTED"
     db.commit()
+    if settings.admin_notify_email:
+        ev = db.query(Event).filter(Event.id == ex.event_id).first()
+        count = db.query(Participant).filter(Participant.exhibitor_id == exhibitor_id).count()
+        company = ex.company_name
+        event_name = ev.name if ev else ""
+
+        def _notify() -> None:
+            sub, text = notify_admin_participants_submitted(company, event_name, count)
+            asyncio.run(send_email(settings.admin_notify_email, sub, text))
+
+        background_tasks.add_task(_notify)
     return {"status": "ok"}
 
 

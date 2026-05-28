@@ -27,7 +27,13 @@ from app.schemas.portal import AdminStatusBody
 from app.services import storage
 from app.services.audit_service import log_event
 from app.services.deadlines import refresh_exhibitor_locks
-from app.services.email_service import render_welcome_exhibitor, send_email
+from app.services.email_service import (
+    render_password_reset,
+    render_section_unlocked,
+    render_task_status_changed,
+    render_welcome_exhibitor,
+    send_email,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -636,7 +642,7 @@ def create_exhibitor(
         },
     )
     if is_new_user and pwd:
-        login_url = "http://localhost:3000/login"
+        login_url = f"{settings.frontend_url}/login"
         text, html = render_welcome_exhibitor(login_url, str(body.email), pwd)
 
         def _send_sync() -> None:
@@ -808,7 +814,7 @@ def get_exhibitor_graphics(exhibitor_id: int, db: Session = Depends(get_db)) -> 
 
 
 @router.post("/graphics/{upload_id}/approve", dependencies=[Depends(require_admin)])
-def approve_graphic(upload_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:
+def approve_graphic(upload_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> Dict[str, str]:
     g = db.query(GraphicUpload).filter(GraphicUpload.id == upload_id).first()
     if not g:
         raise HTTPException(404, "Upload not found")
@@ -818,21 +824,47 @@ def approve_graphic(upload_id: int, db: Session = Depends(get_db)) -> Dict[str, 
         ex.graphics_status = "APPROVED"
         ex.graphics_admin_comment = None
     db.commit()
+    if ex:
+        u = db.query(User).filter(User.id == ex.user_id).first()
+        if u:
+            company = ex.company_name
+
+            def _notify() -> None:
+                text, html = render_task_status_changed(company, "graphics", "APPROVED", None, settings.frontend_url)
+                asyncio.run(send_email(u.email, "ATO COMM — Graphics approved", text, html))
+
+            background_tasks.add_task(_notify)
     return {"status": "ok"}
 
 
 @router.post("/graphics/{upload_id}/revision", dependencies=[Depends(require_admin)])
-def request_graphic_revision(upload_id: int, body: Dict[str, str], db: Session = Depends(get_db)) -> Dict[str, str]:
+def request_graphic_revision(
+    upload_id: int,
+    body: Dict[str, str],
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
     g = db.query(GraphicUpload).filter(GraphicUpload.id == upload_id).first()
     if not g:
         raise HTTPException(404, "Upload not found")
+    comment = body.get("comment", "")
     g.validation_status = "INVALID"
-    g.validation_message = body.get("comment", "")
+    g.validation_message = comment
     ex = db.query(Exhibitor).filter(Exhibitor.id == g.exhibitor_id).first()
     if ex:
         ex.graphics_status = "REVISION_NEEDED"
-        ex.graphics_admin_comment = body.get("comment", "")
+        ex.graphics_admin_comment = comment
     db.commit()
+    if ex:
+        u = db.query(User).filter(User.id == ex.user_id).first()
+        if u:
+            company = ex.company_name
+
+            def _notify() -> None:
+                text, html = render_task_status_changed(company, "graphics", "REVISION_NEEDED", comment, settings.frontend_url)
+                asyncio.run(send_email(u.email, "ATO COMM — Graphics revision required", text, html))
+
+            background_tasks.add_task(_notify)
     return {"status": "ok"}
 
 
@@ -841,6 +873,7 @@ def set_exhibitor_status(
     exhibitor_id: int,
     body: AdminStatusBody,
     request: Request,
+    background_tasks: BackgroundTasks,
     admin: Annotated[User, Depends(require_admin)],
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:
@@ -867,12 +900,40 @@ def set_exhibitor_status(
         user_agent=request.headers.get("user-agent"),
         payload={"exhibitor_id": exhibitor_id, "body": body.model_dump()},
     )
+    u = db.query(User).filter(User.id == ex.user_id).first()
+    if u:
+        company = ex.company_name
+        if body.graphics_status:
+            _section, _status = "graphics", body.graphics_status
+
+            def _ng() -> None:
+                text, html = render_task_status_changed(company, _section, _status, body.comment, settings.frontend_url)
+                asyncio.run(send_email(u.email, f"ATO COMM — Graphics status updated", text, html))
+
+            background_tasks.add_task(_ng)
+        if body.company_status:
+            _section, _status = "company", body.company_status
+
+            def _nc() -> None:
+                text, html = render_task_status_changed(company, _section, _status, body.comment, settings.frontend_url)
+                asyncio.run(send_email(u.email, "ATO COMM — Description status updated", text, html))
+
+            background_tasks.add_task(_nc)
+        if body.participants_status:
+            _section, _status = "participants", body.participants_status
+
+            def _np() -> None:
+                text, html = render_task_status_changed(company, _section, _status, body.comment, settings.frontend_url)
+                asyncio.run(send_email(u.email, "ATO COMM — Participants status updated", text, html))
+
+            background_tasks.add_task(_np)
     return {"status": "ok"}
 
 
 @router.post("/exhibitors/{exhibitor_id}/unlock", dependencies=[Depends(require_admin)])
 def unlock_sections(
     exhibitor_id: int,
+    background_tasks: BackgroundTasks,
     graphics: bool = False,
     company: bool = False,
     participants: bool = False,
@@ -881,15 +942,56 @@ def unlock_sections(
     ex = db.query(Exhibitor).filter(Exhibitor.id == exhibitor_id).first()
     if not ex:
         raise HTTPException(404, "Exhibitor not found")
+    unlocked: List[str] = []
     if graphics:
         ex.section_graphics_locked = False
+        unlocked.append("graphics")
     if company:
         ex.section_company_locked = False
+        unlocked.append("company")
     if participants:
         ex.section_participants_locked = False
+        unlocked.append("participants")
     ex.fully_locked = False
     db.commit()
+    if unlocked:
+        u = db.query(User).filter(User.id == ex.user_id).first()
+        if u:
+            company_name = ex.company_name
+            sections = unlocked
+
+            def _notify() -> None:
+                text, html = render_section_unlocked(company_name, sections, settings.frontend_url)
+                asyncio.run(send_email(u.email, "ATO COMM — Section unlocked for editing", text, html))
+
+            background_tasks.add_task(_notify)
     return {"status": "ok"}
+
+
+@router.post("/exhibitors/{exhibitor_id}/reset-password", dependencies=[Depends(require_admin)])
+def reset_exhibitor_password(
+    exhibitor_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    ex = db.query(Exhibitor).filter(Exhibitor.id == exhibitor_id).first()
+    if not ex:
+        raise HTTPException(404, "Exhibitor not found")
+    u = db.query(User).filter(User.id == ex.user_id).first()
+    if not u:
+        raise HTTPException(404, "User not found")
+    new_pwd = _random_password()
+    u.hashed_password = hash_password(new_pwd)
+    db.commit()
+    login_url = f"{settings.frontend_url}/login"
+    email_addr = u.email
+
+    def _notify() -> None:
+        text, html = render_password_reset(login_url, email_addr, new_pwd)
+        asyncio.run(send_email(email_addr, "ATO COMM — Your password has been reset", text, html))
+
+    background_tasks.add_task(_notify)
+    return {"status": "ok", "temporary_password": new_pwd}
 
 
 @router.post("/exhibitors/{exhibitor_id}/reminder", dependencies=[Depends(require_admin)])
