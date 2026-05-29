@@ -29,6 +29,7 @@ from app.services.audit_service import log_event
 from app.services.deadlines import refresh_exhibitor_locks
 from app.services.email_service import (
     render_password_reset,
+    render_reminder,
     render_section_unlocked,
     render_task_status_changed,
     render_welcome_exhibitor,
@@ -1002,7 +1003,8 @@ def send_reminder(exhibitor_id: int, background_tasks: BackgroundTasks, db: Sess
     u = db.query(User).filter(User.id == ex.user_id).first()
     if u:
         def _send() -> None:
-            asyncio.run(send_email(u.email, "ATO COMM — Reminder", f"Please complete your portal tasks for {ex.company_name}.", ""))
+            text, html = render_reminder(ex.company_name, settings.frontend_url)
+            asyncio.run(send_email(u.email, "ATO COMM — Reminder", text, html))
         background_tasks.add_task(_send)
     return {"status": "ok"}
 

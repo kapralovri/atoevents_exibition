@@ -36,6 +36,7 @@ from app.services import storage
 from app.services.audit_service import log_event
 from app.services.deadlines import refresh_exhibitor_locks
 from app.services.email_service import (
+    notify_admin_change_request,
     notify_admin_equipment,
     notify_admin_new_upload,
     notify_admin_participants_submitted,
@@ -632,8 +633,8 @@ def _finalize_graphic_upload(
         ev = _event(db, ex.event_id)
 
         def _notify() -> None:
-            sub, text = notify_admin_new_upload(ex.company_name, ev.name)
-            asyncio.run(send_email(settings.admin_notify_email, sub, text))
+            sub, text, html = notify_admin_new_upload(ex.company_name, ev.name)
+            asyncio.run(send_email(settings.admin_notify_email, sub, text, html))
 
         background_tasks.add_task(_notify)
 
@@ -940,8 +941,8 @@ def submit_participants(
         event_name = ev.name if ev else ""
 
         def _notify() -> None:
-            sub, text = notify_admin_participants_submitted(company, event_name, count)
-            asyncio.run(send_email(settings.admin_notify_email, sub, text))
+            sub, text, html = notify_admin_participants_submitted(company, event_name, count)
+            asyncio.run(send_email(settings.admin_notify_email, sub, text, html))
 
         background_tasks.add_task(_notify)
     return {"status": "ok"}
@@ -976,8 +977,8 @@ def submit_equipment(
     lines = [{"name": it.name, "quantity": it.quantity} for it in body.items]
 
     def _notify() -> None:
-        sub, text = notify_admin_equipment(ex.company_name, ev.name, lines)
-        asyncio.run(send_email(settings.admin_notify_email, sub, text))
+        sub, text, html = notify_admin_equipment(ex.company_name, ev.name, lines)
+        asyncio.run(send_email(settings.admin_notify_email, sub, text, html))
 
     if background_tasks and settings.admin_notify_email:
         background_tasks.add_task(_notify)
@@ -999,13 +1000,8 @@ def change_request(
     db.refresh(cr)
 
     def _notify() -> None:
-        asyncio.run(
-            send_email(
-                settings.admin_notify_email,
-                "Exhibitor revision request",
-                f"{ex.company_name} requested unlock for {body.section}. {body.message or ''}",
-            )
-        )
+        sub, text, html = notify_admin_change_request(ex.company_name, body.section, body.message or "")
+        asyncio.run(send_email(settings.admin_notify_email, sub, text, html))
 
     if background_tasks and settings.admin_notify_email:
         background_tasks.add_task(_notify)
