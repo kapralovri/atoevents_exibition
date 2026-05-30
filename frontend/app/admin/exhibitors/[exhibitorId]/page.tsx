@@ -34,6 +34,7 @@ import {
   ImageIcon,
   Pencil,
   X,
+  KeyRound,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
@@ -257,6 +258,19 @@ export default function AdminExhibitorDetailPage() {
     }
   };
 
+  const handleResetPassword = async () => {
+    if (!confirm(`Reset password for ${exhibitor?.company_name}?\nA new password will be sent to ${exhibitor?.email}.`)) return;
+    setActionLoading("reset-password");
+    try {
+      await apiFetch(`/admin/exhibitors/${exhibitorId}/reset-password`, { method: "POST" });
+      toast.success("Password reset — new credentials sent to exhibitor");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to reset password");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleApproveTask = async (taskKey: "company_status" | "participants_status") => {
     const loadingKey = `approve-task-${taskKey}`;
     setActionLoading(loadingKey);
@@ -411,6 +425,16 @@ export default function AdminExhibitorDetailPage() {
               >
                 <Send className="h-3.5 w-3.5" />
                 Remind
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleResetPassword}
+                disabled={actionLoading === "reset-password"}
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                Reset Password
               </Button>
               {exhibitor.overall_status === "locked" && (
                 <Button size="sm" className="gap-2" onClick={handleUnlock}>

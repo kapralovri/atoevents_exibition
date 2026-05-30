@@ -172,7 +172,9 @@ def me_exhibitors(user: Annotated[User, Depends(get_current_user)], db: Session 
     rows = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).all()
     result = []
     for ex in rows:
-        ev = _event(db, ex.event_id)
+        ev = db.query(Event).filter(Event.id == ex.event_id).first()
+        if not ev:
+            continue
         refresh_exhibitor_locks(ex, ev)
         db.add(ex)
         result.append({
@@ -300,7 +302,9 @@ def me_patch_company(
         cp.logo_s3_key = body.logo_s3_key
     if body.tv_location is not None:
         ex.tv_location = body.tv_location
-    ex.company_status = "DRAFT"
+    # Only reset review status when actual company-profile content is being changed
+    if any([body.company_name, body.website, body.company_description, body.logo_s3_key]):
+        ex.company_status = "DRAFT"
     db.commit()
     return {"status": "ok"}
 
@@ -335,7 +339,7 @@ def me_put_participants(
         raise HTTPException(403, "Locked")
     # Delete existing and replace
     db.query(Participant).filter(Participant.exhibitor_id == ex.id).delete()
-    quota = max(1, int(ex.area_m2 // 9))
+    quota = max(1, int((ex.area_m2 or 9) // 9))
     complimentary_count = 0
     for p_data in body.participants:
         badge = "COMPLIMENTARY" if complimentary_count < quota else "ADDITIONAL"
@@ -692,7 +696,7 @@ def _finalize_graphic_upload(
 
         background_tasks.add_task(_notify)
 
-    return {"graphic_upload_id": gu.id, "validation_status": "VALID"}
+    return {"graphic_upload_id": gu.id, "validation_status": "UNDER_REVIEW"}
 
 
 @router.post("/uploads/complete")
@@ -907,7 +911,7 @@ def list_participants(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     ex = _get_exhibitor(db, exhibitor_id, user)
-    quota = max(1, int(ex.area_m2 // 9))
+    quota = max(1, int((ex.area_m2 or 9) // 9))
     rows = db.query(Participant).filter(Participant.exhibitor_id == exhibitor_id).all()
     complimentary = sum(1 for r in rows if r.badge_type == "COMPLIMENTARY")
     additional = sum(1 for r in rows if r.badge_type == "ADDITIONAL")
@@ -940,7 +944,7 @@ def add_participant(
     ex = _get_exhibitor(db, exhibitor_id, user)
     if ex.section_participants_locked:
         raise HTTPException(403, "Locked")
-    quota = max(1, int(ex.area_m2 // 9))
+    quota = max(1, int((ex.area_m2 or 9) // 9))
     current = db.query(Participant).filter(Participant.exhibitor_id == exhibitor_id).all()
     complimentary_count = sum(1 for r in current if r.badge_type == "COMPLIMENTARY")
     badge = "COMPLIMENTARY" if complimentary_count < quota else "ADDITIONAL"

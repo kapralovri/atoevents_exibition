@@ -168,7 +168,7 @@ export default function DashboardPage() {
               {data.event_name}
             </h1>
             <p className="mt-1.5 text-xs font-medium" style={{ color: "hsl(210 40% 52%)" }}>
-              {data.booth_type.replace(/_/g, " ")} &middot; {data.booth_size}&thinsp;m²
+              {(data.booth_type ?? "").replace(/_/g, " ")} &middot; {data.booth_size ?? 0}&thinsp;m²
             </p>
           </div>
 

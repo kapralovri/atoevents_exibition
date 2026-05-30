@@ -366,7 +366,7 @@ def list_event_exhibitors(event_id: int, db: Session = Depends(get_db)) -> List[
                 "complete" if _is_exhibitor_complete(ex) else "in_progress"
             ),
             "stand_inventory_id": ex.stand_inventory_id,
-            "booth_type": ex.stand_package.lower().replace("_", " "),
+            "booth_type": (ex.stand_package or "").lower().replace("_", " "),
             "booth_size": ex.area_m2,
         })
     db.commit()
@@ -904,28 +904,25 @@ def set_exhibitor_status(
     u = db.query(User).filter(User.id == ex.user_id).first()
     if u:
         company = ex.company_name
+        email_addr = u.email
+        comment = body.comment
+        frontend_url = settings.frontend_url
         if body.graphics_status:
-            _section, _status = "graphics", body.graphics_status
-
-            def _ng() -> None:
-                text, html = render_task_status_changed(company, _section, _status, body.comment, settings.frontend_url)
-                asyncio.run(send_email(u.email, f"ATO COMM — Graphics status updated", text, html))
+            def _ng(s="graphics", v=body.graphics_status) -> None:
+                text, html = render_task_status_changed(company, s, v, comment, frontend_url)
+                asyncio.run(send_email(email_addr, "ATO COMM — Graphics status updated", text, html))
 
             background_tasks.add_task(_ng)
         if body.company_status:
-            _section, _status = "company", body.company_status
-
-            def _nc() -> None:
-                text, html = render_task_status_changed(company, _section, _status, body.comment, settings.frontend_url)
-                asyncio.run(send_email(u.email, "ATO COMM — Description status updated", text, html))
+            def _nc(s="company", v=body.company_status) -> None:
+                text, html = render_task_status_changed(company, s, v, comment, frontend_url)
+                asyncio.run(send_email(email_addr, "ATO COMM — Description status updated", text, html))
 
             background_tasks.add_task(_nc)
         if body.participants_status:
-            _section, _status = "participants", body.participants_status
-
-            def _np() -> None:
-                text, html = render_task_status_changed(company, _section, _status, body.comment, settings.frontend_url)
-                asyncio.run(send_email(u.email, "ATO COMM — Participants status updated", text, html))
+            def _np(s="participants", v=body.participants_status) -> None:
+                text, html = render_task_status_changed(company, s, v, comment, frontend_url)
+                asyncio.run(send_email(email_addr, "ATO COMM — Participants status updated", text, html))
 
             background_tasks.add_task(_np)
     return {"status": "ok"}
@@ -1002,9 +999,13 @@ def send_reminder(exhibitor_id: int, background_tasks: BackgroundTasks, db: Sess
         raise HTTPException(404, "Exhibitor not found")
     u = db.query(User).filter(User.id == ex.user_id).first()
     if u:
+        company_name = ex.company_name
+        email_addr = u.email
+        frontend_url = settings.frontend_url
+
         def _send() -> None:
-            text, html = render_reminder(ex.company_name, settings.frontend_url)
-            asyncio.run(send_email(u.email, "ATO COMM — Reminder", text, html))
+            text, html = render_reminder(company_name, frontend_url)
+            asyncio.run(send_email(email_addr, "ATO COMM — Reminder", text, html))
         background_tasks.add_task(_send)
     return {"status": "ok"}
 
