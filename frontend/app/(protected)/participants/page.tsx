@@ -17,6 +17,7 @@ import { toast } from "sonner";
 
 interface Participant {
   id?: string;
+  company: string;
   full_name: string;
   email: string;
   job_title: string;
@@ -25,7 +26,7 @@ interface Participant {
 }
 
 const EMPTY_PARTICIPANT: Participant = {
-  full_name: "", email: "", job_title: "", phone: "",
+  company: "", full_name: "", email: "", job_title: "", phone: "",
 };
 
 // ── Request Changes Modal ────────────────────────────────────────────────────
@@ -152,6 +153,7 @@ export default function ParticipantsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [complimentaryQuota, setComplimentaryQuota] = useState<number>(1);
   const [showRequest, setShowRequest] = useState(false);
+  const [companyName, setCompanyName] = useState<string>("");
   const isUnderReview = status === "UNDER_REVIEW" || status === "under_review";
 
   useEffect(() => {
@@ -167,6 +169,7 @@ export default function ParticipantsPage() {
           quota_complimentary?: number;
         }>("/portal/me/exhibitor");
         setExhibitorId(data.id);
+        if (data.company_name) setCompanyName(data.company_name as string);
         setParticipants(data.participants || []);
         setStatus(data.participants_status);
         setAdminComment(data.participants_admin_comment || null);
@@ -184,7 +187,7 @@ export default function ParticipantsPage() {
   }, []);
 
   const addParticipant = () =>
-    setParticipants([...participants, { ...EMPTY_PARTICIPANT }]);
+    setParticipants([...participants, { ...EMPTY_PARTICIPANT, company: companyName }]);
 
   const removeParticipant = (index: number) =>
     setParticipants(participants.filter((_, i) => i !== index));
@@ -420,6 +423,17 @@ export default function ParticipantsPage() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Company *
+                  </Label>
+                  <Input
+                    value={participant.company}
+                    onChange={(e) => updateParticipant(index, "company", e.target.value)}
+                    placeholder="Company name"
+                    disabled={!canEdit}
+                  />
+                </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     Full Name *

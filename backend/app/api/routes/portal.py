@@ -152,6 +152,7 @@ def me_exhibitor(user: Annotated[User, Depends(get_current_user)], db: Session =
         "participants": [
             {
                 "id": str(p.id),
+                "company": p.company,
                 "full_name": f"{p.first_name} {p.last_name}".strip(),
                 "first_name": p.first_name,
                 "last_name": p.last_name,
@@ -161,7 +162,56 @@ def me_exhibitor(user: Annotated[User, Depends(get_current_user)], db: Session =
             }
             for p in db.query(Participant).filter(Participant.exhibitor_id == ex.id).all()
         ],
+        "tv_location": ex.tv_location,
     }
+
+
+@router.get("/me/exhibitors")
+def me_exhibitors(user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    """Return all exhibitor records for the current user (one per event)."""
+    rows = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).all()
+    result = []
+    for ex in rows:
+        ev = _event(db, ex.event_id)
+        refresh_exhibitor_locks(ex, ev)
+        db.add(ex)
+        result.append({
+            "id": ex.id,
+            "company_name": ex.company_name,
+            "event_id": ex.event_id,
+            "event_name": ev.name,
+            "stand_package": ex.stand_package,
+            "area_m2": ex.area_m2,
+            "booth_type": ex.stand_package,
+            "booth_size": ex.area_m2,
+            "graphics_status": ex.graphics_status,
+            "description_status": ex.company_status,
+            "participants_status": ex.participants_status,
+            "overall_status": "complete" if (
+                ex.fully_locked or (
+                    (ex.graphics_status or "").upper() in ("APPROVED", "VALID") and
+                    (ex.company_status or "").upper() in ("APPROVED", "SUBMITTED") and
+                    (ex.participants_status or "").upper() in ("APPROVED", "SUBMITTED")
+                )
+            ) else (
+                "in_progress" if any([
+                    ex.graphics_status not in ("NOT_STARTED", "NOT_UPLOADED", None),
+                    ex.company_status not in ("NOT_STARTED", None),
+                    ex.participants_status not in ("NOT_STARTED", "NOT_SUBMITTED", None),
+                ]) else "not_started"
+            ),
+            "deadline_graphics": str(ev.deadline_graphics_initial) if ev.deadline_graphics_initial else None,
+            "deadline_company_profile": str(ev.deadline_company_profile) if ev.deadline_company_profile else None,
+            "deadline_participants": str(ev.deadline_participants) if ev.deadline_participants else None,
+            "deadline_final_graphics": str(ev.deadline_final_graphics) if ev.deadline_final_graphics else None,
+            "locks": {
+                "graphics": ex.section_graphics_locked,
+                "company": ex.section_company_locked,
+                "participants": ex.section_participants_locked,
+            },
+        })
+    db.commit()
+    return result
 
 
 def _graphic_status(raw: Optional[str]) -> str:
@@ -217,6 +267,7 @@ class _MeCompanyUpdate(BaseModel):
     company_name: Optional[str] = None
     website: Optional[str] = None
     logo_s3_key: Optional[str] = None
+    tv_location: Optional[str] = None
 
 
 class _MeParticipantsBulk(BaseModel):
@@ -247,6 +298,8 @@ def me_patch_company(
         cp.description = body.company_description
     if body.logo_s3_key is not None:
         cp.logo_s3_key = body.logo_s3_key
+    if body.tv_location is not None:
+        ex.tv_location = body.tv_location
     ex.company_status = "DRAFT"
     db.commit()
     return {"status": "ok"}
@@ -294,6 +347,7 @@ def me_put_participants(
         last_name = p_data.get("last_name") or (" ".join(full_name.split(" ")[1:]) if " " in full_name else "")
         p = Participant(
             exhibitor_id=ex.id,
+            company=p_data.get("company", ex.company_name),
             first_name=first_name,
             last_name=last_name,
             job_title=p_data.get("job_title", ""),
@@ -612,7 +666,7 @@ def _finalize_graphic_upload(
         height_px=meta.get("height_px"),
         dpi_x=meta.get("dpi_x"),
         dpi_y=meta.get("dpi_y"),
-        validation_status="VALID",
+        validation_status="UNDER_REVIEW",
         validation_message=msg if msg else None,
     )
     db.add(gu)

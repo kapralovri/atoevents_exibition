@@ -42,6 +42,7 @@ class CompanyProfileUpdate(BaseModel):
 
 
 class ParticipantCreate(BaseModel):
+    company: str = ""
     first_name: str
     last_name: str
     job_title: str

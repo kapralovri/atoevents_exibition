@@ -74,7 +74,6 @@ const CFG_LABELS: Record<string, string> = {
   ISLAND:    "Island",
 };
 
-const AREA_OPTIONS = [9, 12, 15, 18, 21];
 
 const CFGS_BY_PKG: Record<string, string[]> = {
   SHELL_ONLY: ["LINEAR", "ANGULAR", "PENINSULA"],
@@ -433,7 +432,7 @@ export default function EventSettingsPage() {
 
               <div className="space-y-1.5">
                 <FieldLabel htmlFor="start_date" required>Start Date</FieldLabel>
-                <Input id="start_date" type="date" value={form.start_date}
+                <Input id="start_date" type="date" lang="en-US" value={form.start_date}
                   onChange={(e) => setForm({ ...form, start_date: e.target.value })}
                   className={INPUT_CLS} />
                 <FieldError msg={errors.start_date} />
@@ -441,7 +440,7 @@ export default function EventSettingsPage() {
 
               <div className="space-y-1.5">
                 <FieldLabel htmlFor="end_date">End Date</FieldLabel>
-                <Input id="end_date" type="date" value={form.end_date}
+                <Input id="end_date" type="date" lang="en-US" value={form.end_date}
                   onChange={(e) => setForm({ ...form, end_date: e.target.value })}
                   className={INPUT_CLS} />
                 <FieldError msg={errors.end_date} />
@@ -487,7 +486,7 @@ export default function EventSettingsPage() {
               ] as const).map(([key, label]) => (
                 <div key={key} className="space-y-1.5">
                   <FieldLabel htmlFor={key}>{label}</FieldLabel>
-                  <Input id={key} type="date" value={(form as unknown as Record<string, string>)[key] ?? ""}
+                  <Input id={key} type="date" lang="en-US" value={(form as unknown as Record<string, string>)[key] ?? ""}
                     onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                     className={INPUT_CLS} />
                   <FieldError msg={errors[key]} />
@@ -632,11 +631,10 @@ export default function EventSettingsPage() {
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs text-muted-foreground font-medium">Area m²</label>
-                    <select value={newItem.area_m2}
-                      onChange={(e) => setNewItem({ ...newItem, area_m2: parseInt(e.target.value) })}
-                      className={SELECT_CLS}>
-                      {AREA_OPTIONS.map((a) => <option key={a} value={a}>{a} m²</option>)}
-                    </select>
+                    <input type="number" min={0.1} step={0.5} value={newItem.area_m2 || ""}
+                      placeholder="e.g. 9"
+                      onChange={(e) => setNewItem({ ...newItem, area_m2: parseFloat(e.target.value) || 0 })}
+                      className={INPUT_CLS} />
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs text-muted-foreground font-medium">Configuration</label>

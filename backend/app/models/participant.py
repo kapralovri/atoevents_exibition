@@ -13,6 +13,7 @@ class Participant(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     exhibitor_id: Mapped[int] = mapped_column(ForeignKey("exhibitors.id", ondelete="CASCADE"))
 
+    company: Mapped[str] = mapped_column(String(512), default="")
     first_name: Mapped[str] = mapped_column(String(128))
     last_name: Mapped[str] = mapped_column(String(128))
     job_title: Mapped[str] = mapped_column(String(256))

@@ -145,6 +145,8 @@ export default function DescriptionPage() {
 
   // Website state
   const [website, setWebsite] = useState("");
+  const [standPackage, setStandPackage] = useState<string>("");
+  const [tvLocation, setTvLocation] = useState<string>("");
 
   // Logo state
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -161,12 +163,16 @@ export default function DescriptionPage() {
           description_status: string;
           company_admin_comment?: string;
           section_company_locked?: boolean;
+          stand_package?: string;
+          tv_location?: string;
         }>("/portal/me/exhibitor");
         setExhibitorId(ex.id);
         setDescription(ex.description || "");
         setStatus(ex.description_status || "not_submitted");
         setAdminComment(ex.company_admin_comment || null);
         setIsLocked(!!ex.section_company_locked);
+        if (ex.stand_package) setStandPackage(ex.stand_package);
+        if (ex.tv_location) setTvLocation(ex.tv_location);
 
         // Load company profile (logo + website)
         try {
@@ -539,6 +545,37 @@ export default function DescriptionPage() {
               disabled={!canEdit}
             />
           </div>
+
+          {/* TV Location — PRO stands only */}
+          {standPackage === "PRO" && (
+            <div className="space-y-1.5 pt-2" style={{ borderTop: "1px solid hsl(var(--border))" }}>
+              <Label htmlFor="tv_location" className="text-sm font-medium text-foreground">
+                TV Location
+                <span className="ml-2 text-xs text-muted-foreground font-normal">(PRO stands only)</span>
+              </Label>
+              <select
+                id="tv_location"
+                value={tvLocation}
+                onChange={async (e) => {
+                  const val = e.target.value;
+                  setTvLocation(val);
+                  try {
+                    await apiFetch("/portal/me/exhibitor/company", {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ tv_location: val }),
+                    });
+                  } catch {}
+                }}
+                disabled={!canEdit}
+                className="flex h-9 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— Select placement —</option>
+                <option value="On desk">On desk</option>
+                <option value="On wall">On wall</option>
+              </select>
+            </div>
+          )}
 
           {/* Actions */}
           {canEdit && (

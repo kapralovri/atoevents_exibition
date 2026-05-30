@@ -15,6 +15,7 @@ import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 
 interface ExhibitorData {
+  id?: number;
   overall_status: string;
   graphics_status: string;
   description_status: string;
@@ -33,17 +34,23 @@ interface GraphicElement {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<ExhibitorData | null>(null);
+  const [exhibitors, setExhibitors] = useState<ExhibitorData[]>([]);
   const [graphicsElements, setGraphicsElements] = useState<GraphicElement[]>([]);
   const [timeRemaining, setTimeRemaining] = useState<{
     days: number; hours: number; minutes: number;
   } | null>(null);
 
+  const data = exhibitors[0] ?? null;
+
   useEffect(() => {
     async function fetchData() {
       try {
-        const exhibitorData = await apiFetch<ExhibitorData>("/portal/me/exhibitor");
-        setData(exhibitorData);
+        const list = await apiFetch<ExhibitorData[]>("/portal/me/exhibitors").catch(
+          () => apiFetch<ExhibitorData>("/portal/me/exhibitor").then((d) => [d])
+        );
+        setExhibitors(list);
+        const exhibitorData = list[0];
+        if (!exhibitorData) return;
 
         const graphics = await apiFetch<GraphicElement[]>("/portal/me/exhibitor/graphics");
         setGraphicsElements(graphics);
@@ -553,6 +560,68 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* ── Additional events (if exhibitor participates in multiple) ── */}
+      {exhibitors.slice(1).map((ex) => {
+        const egs = ex.graphics_status?.toLowerCase() ?? "";
+        const eds = ex.description_status?.toLowerCase() ?? "";
+        const eps = ex.participants_status?.toLowerCase() ?? "";
+        const exTasks = [
+          { title: "Upload Graphics",     status: ex.graphics_status,     icon: FileImage },
+          { title: "Company Description", status: ex.description_status,  icon: FileText  },
+          { title: "Participants List",   status: ex.participants_status,  icon: Users     },
+        ];
+        const exProgress = Math.round(
+          ([["approved","valid"].includes(egs), ["approved","submitted"].includes(eds), ["approved","submitted"].includes(eps)]
+            .filter(Boolean).length / 3) * 100
+        );
+        return (
+          <div
+            key={ex.id ?? ex.event_name}
+            className="rounded-2xl border bg-card card-elevated overflow-hidden"
+            style={{ borderColor: "hsl(var(--border))" }}
+          >
+            <div
+              className="px-5 py-4 flex items-center justify-between gap-4"
+              style={{ background: "linear-gradient(135deg, hsl(209 65% 22%) 0%, hsl(209 65% 15%) 100%)" }}
+            >
+              <div className="min-w-0">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] mb-0.5" style={{ color: "hsl(154 100% 49% / 0.55)" }}>Event</p>
+                <h2 className="text-base font-bold text-white truncate">{ex.event_name}</h2>
+                <p className="text-xs mt-0.5 font-medium" style={{ color: "hsl(210 40% 52%)" }}>
+                  {ex.booth_type?.replace(/_/g, " ")} &middot; {ex.booth_size}&thinsp;m²
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                <StatusBadge status={ex.overall_status} />
+                <span className="text-xs tabular-nums font-medium" style={{ color: "hsl(154 100% 49% / 0.7)" }}>{exProgress}% complete</span>
+              </div>
+            </div>
+            <div className="px-5 py-4 grid gap-2 sm:grid-cols-3">
+              {exTasks.map(({ title, status, icon: Icon }) => {
+                const s = status?.toLowerCase() ?? "";
+                const done = ["approved", "valid", "submitted"].includes(s);
+                const review = s === "under_review";
+                return (
+                  <div key={title} className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+                    style={{ background: "hsl(213 20% 97%)", border: "1px solid hsl(var(--border) / 0.65)" }}>
+                    <div className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ background: done ? "hsl(154 100% 49% / 0.1)" : review ? "hsl(45 100% 94%)" : "hsl(209 65% 21% / 0.06)" }}>
+                      {done
+                        ? <CheckCircle2 className="h-4 w-4" style={{ color: "hsl(154 60% 38%)" }} />
+                        : <Icon className="h-4 w-4" style={{ color: review ? "hsl(45 80% 40%)" : "hsl(209 65% 40%)" }} />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground truncate">{title}</p>
+                      <StatusBadge status={status || "not_started"} className="mt-0.5 text-[10px]" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

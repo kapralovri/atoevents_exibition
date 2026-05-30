@@ -690,7 +690,7 @@ export default function GraphicsPage() {
                   <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-medium"
                     style={{ background: "hsl(45 100% 94%)", color: "hsl(45 80% 30%)", border: "1px solid hsl(45 80% 82%)" }}>
                     <Clock className="h-4 w-4 shrink-0" />
-                    File received — under admin review
+                    File uploaded · pending review
                   </div>
                 )}
 

@@ -22,6 +22,7 @@ class Exhibitor(Base):
     stand_inventory_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     glass_panel_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tv_location: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     manual_acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     manual_defer_until_next_login: Mapped[bool] = mapped_column(Boolean, default=False)

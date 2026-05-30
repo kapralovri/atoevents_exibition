@@ -819,7 +819,7 @@ def approve_graphic(upload_id: int, background_tasks: BackgroundTasks, db: Sessi
     g = db.query(GraphicUpload).filter(GraphicUpload.id == upload_id).first()
     if not g:
         raise HTTPException(404, "Upload not found")
-    g.validation_status = "VALID"
+    g.validation_status = "APPROVED"
     ex = db.query(Exhibitor).filter(Exhibitor.id == g.exhibitor_id).first()
     if ex:
         ex.graphics_status = "APPROVED"

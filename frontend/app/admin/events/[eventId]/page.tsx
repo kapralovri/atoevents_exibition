@@ -469,6 +469,15 @@ export default function AdminEventDetailPage() {
         </Card>
       </div>
 
+      {/* ── Total booked area KPI ──────────────────────────────── */}
+      {exhibitors.length > 0 && (
+        <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 w-fit text-sm font-medium"
+          style={{ background: "hsl(154 80% 94%)", border: "1px solid hsl(154 60% 82%)", color: "hsl(154 60% 28%)" }}>
+          <span className="font-bold">{exhibitors.reduce((s, e) => s + (e.area_m2 || 0), 0).toFixed(1)} m²</span>
+          <span className="text-xs opacity-75">total booked area</span>
+        </div>
+      )}
+
       {/* ── Register form ────────────────────────────────────── */}
       {showRegisterForm && (
         <Card
@@ -965,7 +974,7 @@ export default function AdminEventDetailPage() {
               <p className="text-sm text-muted-foreground">
                 Share these credentials with the exhibitor so they can log in at{" "}
                 <span className="font-mono text-xs font-semibold text-foreground">
-                  localhost:3000/login
+                  https://expo.atocomm.eu/login
                 </span>
               </p>
 
