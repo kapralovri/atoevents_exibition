@@ -161,6 +161,7 @@ export default function ParticipantsPage() {
       try {
         const data = await apiFetch<{
           id: number;
+          company_name?: string;
           participants: Participant[];
           participants_status: string;
           participants_admin_comment?: string;
