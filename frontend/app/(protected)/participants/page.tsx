@@ -174,7 +174,7 @@ export default function ParticipantsPage() {
         setParticipants(data.participants || []);
         setStatus(data.participants_status);
         setAdminComment(data.participants_admin_comment || null);
-        setIsLocked(!!(data as any).locks?.participants ?? !!data.section_participants_locked);
+        setIsLocked(!!(((data as any).locks?.participants) ?? data.section_participants_locked));
         if (data.quota_complimentary != null) {
           setComplimentaryQuota(data.quota_complimentary);
         } else if (data.area_m2 != null) {
