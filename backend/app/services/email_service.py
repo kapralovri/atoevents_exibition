@@ -497,6 +497,61 @@ def notify_admin_participants_submitted(
     return subject, text, html
 
 
+def notify_admin_description_submitted(
+    company_name: str,
+    event_name: str,
+) -> Tuple[str, str, str]:
+    subject = f"Company description submitted: {company_name}"
+    text    = f"{company_name} submitted their company description for {event_name}."
+    body_content = (
+        f"<p style='margin:0 0 8px 0;'><strong>{company_name}</strong> has submitted "
+        f"their company description for <strong>{event_name}</strong>.</p>"
+        "<p style='margin:8px 0 0 0;color:#6d6d6d;font-size:14px;'>"
+        "Please review it in the admin panel.</p>"
+    )
+    html = _html_layout(
+        "Admin Notification",
+        f"Company description<br><span style='color:{_GREEN};'>submitted.</span>",
+        _body_text(body_content),
+    )
+    return subject, text, html
+
+
+def render_welcome_manager(
+    login_url: str,
+    email_addr: str,
+    password: str,
+) -> Tuple[str, str]:
+    text = (
+        f"Welcome to the ATO COMM Management Portal.\n\n"
+        f"An organizer account has been created for you with full access to the "
+        f"admin panel. Please log in using the credentials below.\n\n"
+        f"Login:              {email_addr}\n"
+        f"Temporary password: {password}\n\n"
+        f"After logging in you can change your password in the portal settings.\n\n"
+        f"Open portal: {login_url}\n\n"
+        f"ato comm d.o.o. · Ptujska Gora 37A, 2323 Slovenia"
+    )
+    body = (
+        _body_text(
+            "<p style='margin:0 0 8px 0;'>An organizer account has been created for you "
+            "with full access to the ATO COMM Management Portal. "
+            "Please use the credentials below to sign in.</p>"
+            + _credentials_block("Login", email_addr)
+            + _credentials_block("Temporary password", password)
+            + "<p style='margin:16px 0 0 0;font-size:14px;color:#6d6d6d;'>"
+            "After logging in you can change your password in the portal settings.</p>"
+        )
+        + _cta_button(login_url, "Open Portal")
+    )
+    html = _html_layout(
+        "Portal Access",
+        f"Welcome to the<br>ATO COMM <span style='color:{_GREEN};'>Management Portal.</span>",
+        body,
+    )
+    return text, html
+
+
 def notify_admin_change_request(
     company_name: str,
     section: str,

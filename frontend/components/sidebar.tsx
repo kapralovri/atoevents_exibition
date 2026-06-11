@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
+  UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -37,6 +38,7 @@ const navItems: NavItem[] = [
   // Admin
   { title: "Events",          href: "/admin/events",     icon: Calendar,        role: "admin", section: "main" },
   { title: "Tasks",           href: "/admin/tasks",      icon: CheckSquare,     role: "admin", section: "main" },
+  { title: "Managers",        href: "/admin/managers",   icon: UsersRound,      role: "admin", section: "main" },
   { title: "Audit Log",       href: "/admin/audit",      icon: ClipboardList,   role: "admin", section: "main" },
   { title: "Analytics",       href: "/admin/analytics",  icon: BarChart3,       role: "admin", section: "main" },
 ];

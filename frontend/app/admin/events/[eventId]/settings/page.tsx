@@ -20,6 +20,7 @@ import {
   Loader2,
   Layers,
   ShieldAlert,
+  Users,
   X,
 } from "lucide-react";
 
@@ -43,6 +44,13 @@ interface AvailabilityItem extends StandInventoryItem {
   backdrop_url?: string | null;
 }
 
+interface Manager {
+  id: number;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+}
+
 interface SettingsForm {
   name: string;
   start_date: string;
@@ -55,6 +63,12 @@ interface SettingsForm {
   deadline_participants: string;
   deadline_final_graphics: string;
   stand_inventory: StandInventoryItem[];
+  responsible_id: string;
+  observer_ids: number[];
+}
+
+function managerLabel(m: Manager): string {
+  return m.full_name ? `${m.full_name} · ${m.email}` : m.email;
 }
 
 type FieldErrors = Partial<Record<string, string>>;
@@ -143,6 +157,7 @@ export default function EventSettingsPage() {
   const [errors, setErrors]   = useState<FieldErrors>({});
   const [isSaving, setIsSaving] = useState(false);
   const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
+  const [managers, setManagers] = useState<Manager[]>([]);
 
   // Inline "add row" state
   const [addRow, setAddRow] = useState(false);
@@ -170,7 +185,8 @@ export default function EventSettingsPage() {
       apiFetch<Record<string, unknown>>(`/admin/events/${eventId}`),
       apiFetch<AvailabilityItem[]>(`/admin/events/${eventId}/stand-availability`).catch(() => []),
       apiFetch<Array<{ doc_type: string; title: string; original_filename?: string }>>(`/admin/events/${eventId}/documents`).catch(() => []),
-    ]).then(([ev, avail, docs]) => {
+      apiFetch<Manager[]>(`/admin/managers`).catch(() => []),
+    ]).then(([ev, avail, docs, mgrs]) => {
       const d = (k: string) => ((ev[k] as string) || "");
       setForm({
         name:                       d("name"),
@@ -184,7 +200,10 @@ export default function EventSettingsPage() {
         deadline_participants:      d("deadline_participants"),
         deadline_final_graphics:    d("deadline_final_graphics"),
         stand_inventory:            (ev.stand_inventory as StandInventoryItem[]) ?? [],
+        responsible_id:             ev.responsible_id != null ? String(ev.responsible_id) : "",
+        observer_ids:               Array.isArray(ev.observer_ids) ? (ev.observer_ids as number[]) : [],
       });
+      setManagers((mgrs as Manager[]).filter((m) => m.is_active));
       setAvailability(avail as AvailabilityItem[]);
       const schedule = (docs as Array<{ doc_type: string; title: string; original_filename?: string }>)
         .find((d) => d.doc_type === "setup_schedule");
@@ -230,6 +249,8 @@ export default function EventSettingsPage() {
           deadline_participants:     form.deadline_participants || null,
           deadline_final_graphics:   form.deadline_final_graphics || null,
           stand_inventory:           form.stand_inventory,
+          responsible_id:            form.responsible_id ? Number(form.responsible_id) : null,
+          observer_ids:              form.observer_ids,
         }),
       });
       toast.success("Settings saved");
@@ -360,6 +381,7 @@ export default function EventSettingsPage() {
   const navItems = [
     { id: "basic",     label: "Basic Details",    icon: FileText   },
     { id: "deadlines", label: "Deadlines",         icon: Clock      },
+    { id: "team",      label: "Team",              icon: Users      },
     { id: "inventory", label: "Stand Inventory",   icon: Layers     },
     { id: "documents", label: "Documents",         icon: ImageIcon  },
     { id: "danger",    label: "Danger Zone",       icon: ShieldAlert },
@@ -498,8 +520,92 @@ export default function EventSettingsPage() {
             </p>
           </SectionCard>
 
-          {/* ─────────────── 3. STAND INVENTORY ─────────────── */}
-          <SectionCard id="inventory" icon={Layers} title="3. Stand Inventory">
+          {/* ─────────────── 3. TEAM ─────────────── */}
+          <SectionCard id="team" icon={Users} title="3. Team (notifications)">
+            <p className="text-xs text-muted-foreground">
+              The responsible manager and observers receive all email notifications for this event
+              (exhibitor submissions and status changes).
+            </p>
+
+            {managers.length === 0 ? (
+              <div className="text-xs rounded-lg px-3 py-2.5"
+                style={{ background: "hsl(45 90% 95%)", border: "1px solid hsl(45 80% 80%)", color: "hsl(35 60% 32%)" }}>
+                No active managers. Add managers in{" "}
+                <Link href="/admin/managers" className="underline font-semibold">Managers</Link>{" "}
+                first, then assign them here.
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {/* Responsible */}
+                <div className="space-y-1.5">
+                  <FieldLabel htmlFor="responsible_id">Responsible</FieldLabel>
+                  <select
+                    id="responsible_id"
+                    value={form.responsible_id}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        responsible_id: e.target.value,
+                        observer_ids: form.observer_ids.filter((id) => String(id) !== e.target.value),
+                      })
+                    }
+                    className={SELECT_CLS}
+                  >
+                    <option value="">— None —</option>
+                    {managers.map((m) => (
+                      <option key={m.id} value={String(m.id)}>{managerLabel(m)}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Observers */}
+                <div className="space-y-1.5">
+                  <FieldLabel>
+                    Observers
+                    {form.observer_ids.length > 0 && (
+                      <span className="ml-1.5 text-muted-foreground/70 normal-case font-normal">
+                        ({form.observer_ids.length} selected)
+                      </span>
+                    )}
+                  </FieldLabel>
+                  <div className="flex flex-wrap gap-1.5">
+                    {managers
+                      .filter((m) => String(m.id) !== form.responsible_id)
+                      .map((m) => {
+                        const selected = form.observer_ids.includes(m.id);
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() =>
+                              setForm({
+                                ...form,
+                                observer_ids: selected
+                                  ? form.observer_ids.filter((id) => id !== m.id)
+                                  : [...form.observer_ids, m.id],
+                              })
+                            }
+                            className="text-xs font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 active:scale-95"
+                            style={{
+                              background: selected ? "hsl(154 80% 94%)" : "#FFFFFF",
+                              color: selected ? "hsl(154 70% 26%)" : "hsl(210 12% 42%)",
+                              border: selected ? "1px solid hsl(154 55% 70%)" : "1px solid hsl(210 18% 86%)",
+                              transition: "background-color 120ms, color 120ms, border-color 120ms, transform 100ms",
+                            }}
+                          >
+                            {selected && <span style={{ color: "hsl(154 70% 34%)" }}>✓</span>}
+                            {m.full_name || m.email}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </SectionCard>
+
+          {/* ─────────────── 4. STAND INVENTORY ─────────────── */}
+          <SectionCard id="inventory" icon={Layers} title="4. Stand Inventory">
 
             {/* Table */}
             {form.stand_inventory.length > 0 ? (
@@ -685,8 +791,8 @@ export default function EventSettingsPage() {
             </p>
           </SectionCard>
 
-          {/* ─────────────── 4. DOCUMENTS ─────────────── */}
-          <SectionCard id="documents" icon={FileText} title="4. Documents">
+          {/* ─────────────── 5. DOCUMENTS ─────────────── */}
+          <SectionCard id="documents" icon={FileText} title="5. Documents">
             <div className="space-y-3">
               <FieldLabel>Arrival Schedule (PDF)</FieldLabel>
               <p className="text-xs text-muted-foreground">

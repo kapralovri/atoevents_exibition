@@ -40,6 +40,13 @@ import {
   initialsOf,
 } from "@/components/glass";
 
+interface ManagerBrief {
+  id: number;
+  email: string;
+  full_name: string;
+  is_active?: boolean;
+}
+
 interface Event {
   id: string;
   name: string;
@@ -52,6 +59,8 @@ interface Event {
   alias_shell?: string;
   alias_system?: string;
   alias_bespoke?: string;
+  responsible?: ManagerBrief | null;
+  observers?: ManagerBrief[];
 }
 
 interface Exhibitor {
@@ -468,6 +477,36 @@ export default function AdminEventDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Event team (responsible + observers) ───────────────── */}
+      {(event.responsible || (event.observers && event.observers.length > 0)) && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl px-4 py-3"
+          style={{ background: "hsl(209 65% 21% / 0.04)", border: "1px solid hsl(209 65% 21% / 0.1)" }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <Users className="h-3.5 w-3.5 shrink-0" style={{ color: "hsl(209 65% 38%)" }} />
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Responsible</span>
+            {event.responsible ? (
+              <span className="text-sm font-semibold text-[hsl(209_65%_21%)] truncate">
+                {event.responsible.full_name || event.responsible.email}
+              </span>
+            ) : (
+              <span className="text-sm text-muted-foreground">— not set —</span>
+            )}
+          </div>
+          {event.observers && event.observers.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Observers</span>
+              {event.observers.map((o) => (
+                <span key={o.id}
+                  className="text-xs font-medium px-2 py-0.5 rounded-full"
+                  style={{ background: "#FFFFFF", color: "hsl(210 12% 38%)", border: "1px solid hsl(210 18% 86%)" }}>
+                  {o.full_name || o.email}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Total booked area KPI ──────────────────────────────── */}
       {exhibitors.length > 0 && (

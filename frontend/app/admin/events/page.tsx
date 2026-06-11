@@ -50,6 +50,13 @@ interface Event {
   deadline_final_graphics?: string | null;
 }
 
+interface Manager {
+  id: number;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+}
+
 interface NewEventForm {
   // Section 1 — Metadata
   name: string;
@@ -62,6 +69,9 @@ interface NewEventForm {
   deadline_company_profile: string;
   deadline_participants: string;
   deadline_final_graphics: string;
+  // Section 3 — Team
+  responsible_id: string;
+  observer_ids: number[];
 }
 
 type FieldErrors = Partial<Record<keyof NewEventForm | string, string>>;
@@ -111,7 +121,13 @@ function blankForm(): NewEventForm {
     deadline_company_profile: "",
     deadline_participants: "",
     deadline_final_graphics: "",
+    responsible_id: "",
+    observer_ids: [],
   };
+}
+
+function managerLabel(m: Manager): string {
+  return m.full_name ? `${m.full_name} · ${m.email}` : m.email;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -438,11 +454,13 @@ export default function AdminEventsPage() {
   const [form, setForm] = useState<NewEventForm>(blankForm());
   const [errors, setErrors] = useState<FieldErrors>({});
   const [isCreating, setIsCreating] = useState(false);
+  const [managers, setManagers] = useState<Manager[]>([]);
 
   // Section open/closed state
   const [openSections, setOpenSections] = useState({
     metadata: true,
     deadlines: true,
+    team: true,
   });
 
   // ── Filters ─────────────────────────────────────────────────────────
@@ -454,9 +472,12 @@ export default function AdminEventsPage() {
   const PAGE_SIZE = 8;
 
 
-  // Load events on mount
+  // Load events + managers on mount
   useEffect(() => {
     loadEvents();
+    apiFetch<Manager[]>("/admin/managers")
+      .then((data) => setManagers(data.filter((m) => m.is_active)))
+      .catch(() => {});
   }, []);
 
   // Auto-recalc deadlines when start_date changes
@@ -534,6 +555,8 @@ export default function AdminEventsPage() {
       deadline_company_profile: form.deadline_company_profile || null,
       deadline_participants: form.deadline_participants || null,
       deadline_final_graphics: form.deadline_final_graphics || null,
+      responsible_id: form.responsible_id ? Number(form.responsible_id) : null,
+      observer_ids: form.observer_ids,
     };
 
     try {
@@ -756,6 +779,114 @@ export default function AdminEventsPage() {
                               )
                             )}
                           </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Section 3: Team ── */}
+                    <div
+                      className="rounded-xl overflow-hidden"
+                      style={{ border: "1px solid hsl(209 65% 21% / 0.1)" }}
+                    >
+                      <div className="px-4 pt-3 pb-1">
+                        <SectionHeader
+                          icon={Users}
+                          title="3. Team (notifications)"
+                          open={openSections.team}
+                          onToggle={() => toggleSection("team")}
+                        />
+                      </div>
+                      {openSections.team && (
+                        <div
+                          className="px-4 pb-4 pt-2 space-y-4"
+                          style={{ background: "hsl(209 65% 21% / 0.015)" }}
+                        >
+                          <p className="text-xs text-muted-foreground">
+                            The responsible manager and observers receive all email notifications for
+                            this event (exhibitor submissions and status changes).
+                          </p>
+
+                          {managers.length === 0 ? (
+                            <div className="text-xs rounded-lg px-3 py-2.5"
+                              style={{ background: "hsl(45 90% 95%)", border: "1px solid hsl(45 80% 80%)", color: "hsl(35 60% 32%)" }}>
+                              No managers yet. Add managers in{" "}
+                              <Link href="/admin/managers" className="underline font-semibold">Managers</Link>{" "}
+                              first, then assign them here.
+                            </div>
+                          ) : (
+                            <>
+                              {/* Responsible */}
+                              <div className="space-y-1.5">
+                                <FieldLabel htmlFor="responsible_id">Responsible</FieldLabel>
+                                <select
+                                  id="responsible_id"
+                                  value={form.responsible_id}
+                                  onChange={(e) =>
+                                    setForm({
+                                      ...form,
+                                      responsible_id: e.target.value,
+                                      observer_ids: form.observer_ids.filter(
+                                        (id) => String(id) !== e.target.value,
+                                      ),
+                                    })
+                                  }
+                                  className="h-9 text-sm rounded-lg border border-input bg-background px-3 w-full focus:outline-none focus:ring-2 focus:ring-[hsl(209_65%_38%)]"
+                                >
+                                  <option value="">— None —</option>
+                                  {managers.map((m) => (
+                                    <option key={m.id} value={String(m.id)}>
+                                      {managerLabel(m)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* Observers */}
+                              <div className="space-y-1.5">
+                                <FieldLabel>
+                                  Observers
+                                  {form.observer_ids.length > 0 && (
+                                    <span className="ml-1.5 text-muted-foreground/70 normal-case font-normal">
+                                      ({form.observer_ids.length} selected)
+                                    </span>
+                                  )}
+                                </FieldLabel>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {managers
+                                    .filter((m) => String(m.id) !== form.responsible_id)
+                                    .map((m) => {
+                                      const selected = form.observer_ids.includes(m.id);
+                                      return (
+                                        <button
+                                          key={m.id}
+                                          type="button"
+                                          onClick={() =>
+                                            setForm({
+                                              ...form,
+                                              observer_ids: selected
+                                                ? form.observer_ids.filter((id) => id !== m.id)
+                                                : [...form.observer_ids, m.id],
+                                            })
+                                          }
+                                          className="text-xs font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 active:scale-95"
+                                          style={{
+                                            background: selected ? "hsl(154 80% 94%)" : "#FFFFFF",
+                                            color: selected ? "hsl(154 70% 26%)" : "hsl(210 12% 42%)",
+                                            border: selected
+                                              ? "1px solid hsl(154 55% 70%)"
+                                              : "1px solid hsl(210 18% 86%)",
+                                            transition: "background-color 120ms, color 120ms, border-color 120ms, transform 100ms",
+                                          }}
+                                        >
+                                          {selected && <span className="text-[hsl(154_70%_34%)]">✓</span>}
+                                          {m.full_name || m.email}
+                                        </button>
+                                      );
+                                    })}
+                                </div>
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import safe_decode
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, is_staff
 
 security = HTTPBearer(auto_error=False)
 
@@ -37,6 +37,7 @@ def get_current_user(
 
 
 def require_admin(user: Annotated[User, Depends(get_current_user)]) -> User:
-    if user.role != UserRole.ADMIN.value:
+    # Managers have full admin-panel access (treated as staff alongside admins).
+    if not is_staff(user.role):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     return user

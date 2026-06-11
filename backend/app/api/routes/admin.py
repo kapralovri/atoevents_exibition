@@ -22,7 +22,7 @@ from app.models.faq import FaqItem
 from app.models.company import CompanyProfile
 from app.models.graphic import GraphicUpload
 from app.models.participant import Participant
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, is_staff
 from app.schemas.portal import AdminStatusBody
 from app.services import storage
 from app.services.audit_service import log_event
@@ -33,8 +33,10 @@ from app.services.email_service import (
     render_section_unlocked,
     render_task_status_changed,
     render_welcome_exhibitor,
+    render_welcome_manager,
     send_email,
 )
+from app.services.recipients import event_recipient_emails
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -72,6 +74,9 @@ class EventCreate(BaseModel):
     deadline_company_profile: Optional[date] = None
     deadline_participants: Optional[date] = None
     deadline_final_graphics: Optional[date] = None
+    # Event team — one responsible manager + any number of observers (user ids)
+    responsible_id: Optional[int] = None
+    observer_ids: Optional[List[int]] = None
 
 
 class EventUpdate(BaseModel):
@@ -93,6 +98,19 @@ class EventUpdate(BaseModel):
     deadline_final_graphics: Optional[date] = None
     reminder_offsets_days: Optional[List[int]] = None
     backdrop_s3_keys: Optional[Dict[str, Any]] = None
+    responsible_id: Optional[int] = None
+    observer_ids: Optional[List[int]] = None
+
+
+class ManagerCreate(BaseModel):
+    email: EmailStr
+    full_name: Optional[str] = None
+    send_welcome: bool = True
+
+
+class ManagerUpdate(BaseModel):
+    full_name: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 class ExhibitorCreate(BaseModel):
@@ -173,6 +191,87 @@ def _is_exhibitor_complete(ex: Exhibitor) -> bool:
     return graphics_done and company_done and participants_done
 
 
+# ── Event team helpers ────────────────────────────────────────────────────────
+
+def _valid_manager_ids(db: Session, ids: Optional[List[int]]) -> List[int]:
+    """Keep only ids that belong to existing staff (admin/manager) users.
+
+    Preserves input order and de-duplicates.
+    """
+    if not ids:
+        return []
+    seen: set = set()
+    ordered: List[int] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            ordered.append(i)
+    found = {
+        u.id: u.role
+        for u in db.query(User).filter(User.id.in_(ordered)).all()
+    }
+    return [i for i in ordered if i in found and is_staff(found[i])]
+
+
+def _user_brief(u: Optional[User]) -> Optional[Dict[str, Any]]:
+    if not u:
+        return None
+    return {
+        "id": u.id,
+        "email": u.email,
+        "full_name": u.full_name or "",
+        "is_active": u.is_active,
+    }
+
+
+def _event_team(db: Session, ev: Event) -> Dict[str, Any]:
+    """Resolve the event's responsible + observers into brief user payloads."""
+    responsible = None
+    if ev.responsible_id:
+        responsible = _user_brief(
+            db.query(User).filter(User.id == ev.responsible_id).first()
+        )
+    observer_ids = [int(i) for i in (ev.observer_ids or []) if isinstance(i, (int, str)) and str(i).isdigit()]
+    observers: List[Dict[str, Any]] = []
+    if observer_ids:
+        by_id = {u.id: u for u in db.query(User).filter(User.id.in_(set(observer_ids))).all()}
+        for oid in observer_ids:
+            brief = _user_brief(by_id.get(oid))
+            if brief:
+                observers.append(brief)
+    return {
+        "responsible_id": ev.responsible_id,
+        "responsible": responsible,
+        "observer_ids": [o["id"] for o in observers],
+        "observers": observers,
+    }
+
+
+def _notify_event_team_status(
+    db: Session,
+    background_tasks: BackgroundTasks,
+    event_id: int,
+    subject: str,
+    text: str,
+    html: str,
+) -> None:
+    """Send a copy of an organizer-side status notification to the event team
+    (responsible + observers). No fallback to the generic admin inbox — these
+    are informational copies on top of the exhibitor-facing email."""
+    if not background_tasks:
+        return
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    recipients = event_recipient_emails(db, ev, fallback_admin=False)
+    if not recipients:
+        return
+
+    def _send() -> None:
+        for addr in recipients:
+            asyncio.run(send_email(addr, subject, text, html))
+
+    background_tasks.add_task(_send)
+
+
 # ── Event endpoints ───────────────────────────────────────────────────────────
 
 @router.post("/events", dependencies=[Depends(require_admin)])
@@ -182,6 +281,10 @@ def create_event(body: EventCreate, db: Session = Depends(get_db)) -> Dict[str, 
         [item.model_dump() for item in body.stand_inventory]
         if body.stand_inventory else None
     )
+    observer_ids = _valid_manager_ids(db, body.observer_ids)
+    responsible_id = body.responsible_id
+    if responsible_id is not None and not _valid_manager_ids(db, [responsible_id]):
+        responsible_id = None
     ev = Event(
         name=body.name,
         description=body.description,
@@ -196,6 +299,8 @@ def create_event(body: EventCreate, db: Session = Depends(get_db)) -> Dict[str, 
         stand_slots=body.stand_slots,
         stand_inventory=inv_data,
         reminder_offsets_days=[30, 14, 7, 3, 1],
+        responsible_id=responsible_id,
+        observer_ids=observer_ids,
         deadline_graphics_initial=body.deadline_graphics_initial or auto["deadline_graphics_initial"],
         deadline_company_profile=body.deadline_company_profile or auto["deadline_company_profile"],
         deadline_participants=body.deadline_participants or auto["deadline_participants"],
@@ -229,6 +334,7 @@ def list_events(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
             "deadline_company_profile": str(e.deadline_company_profile) if e.deadline_company_profile else None,
             "deadline_participants": str(e.deadline_participants) if e.deadline_participants else None,
             "deadline_final_graphics": str(e.deadline_final_graphics) if e.deadline_final_graphics else None,
+            **_event_team(db, e),
         })
     return result
 
@@ -275,6 +381,7 @@ def get_event(event_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
         "exhibitor_count": len(exs),
         "completed_count": completed,
         "documents": docs,
+        **_event_team(db, ev),
     }
 
 
@@ -290,6 +397,12 @@ def update_event(event_id: int, body: EventUpdate, db: Session = Depends(get_db)
             item if isinstance(item, dict) else item
             for item in data["stand_inventory"]
         ]
+    # Validate event-team fields against existing staff users
+    if "observer_ids" in data:
+        data["observer_ids"] = _valid_manager_ids(db, data.get("observer_ids"))
+    if "responsible_id" in data:
+        rid = data.get("responsible_id")
+        data["responsible_id"] = rid if (rid is not None and _valid_manager_ids(db, [rid])) else None
     for k, v in data.items():
         setattr(ev, k, v)
     db.commit()
@@ -827,14 +940,14 @@ def approve_graphic(upload_id: int, background_tasks: BackgroundTasks, db: Sessi
     db.commit()
     if ex:
         u = db.query(User).filter(User.id == ex.user_id).first()
+        subject = "ATO COMM — Graphics approved"
+        text, html = render_task_status_changed(ex.company_name, "graphics", "APPROVED", None, settings.frontend_url)
         if u:
-            company = ex.company_name
-
-            def _notify() -> None:
-                text, html = render_task_status_changed(company, "graphics", "APPROVED", None, settings.frontend_url)
-                asyncio.run(send_email(u.email, "ATO COMM — Graphics approved", text, html))
+            def _notify(addr=u.email) -> None:
+                asyncio.run(send_email(addr, subject, text, html))
 
             background_tasks.add_task(_notify)
+        _notify_event_team_status(db, background_tasks, ex.event_id, subject, text, html)
     return {"status": "ok"}
 
 
@@ -858,14 +971,14 @@ def request_graphic_revision(
     db.commit()
     if ex:
         u = db.query(User).filter(User.id == ex.user_id).first()
+        subject = "ATO COMM — Graphics revision required"
+        text, html = render_task_status_changed(ex.company_name, "graphics", "REVISION_NEEDED", comment, settings.frontend_url)
         if u:
-            company = ex.company_name
-
-            def _notify() -> None:
-                text, html = render_task_status_changed(company, "graphics", "REVISION_NEEDED", comment, settings.frontend_url)
-                asyncio.run(send_email(u.email, "ATO COMM — Graphics revision required", text, html))
+            def _notify(addr=u.email) -> None:
+                asyncio.run(send_email(addr, subject, text, html))
 
             background_tasks.add_task(_notify)
+        _notify_event_team_status(db, background_tasks, ex.event_id, subject, text, html)
     return {"status": "ok"}
 
 
@@ -902,29 +1015,26 @@ def set_exhibitor_status(
         payload={"exhibitor_id": exhibitor_id, "body": body.model_dump()},
     )
     u = db.query(User).filter(User.id == ex.user_id).first()
-    if u:
-        company = ex.company_name
-        email_addr = u.email
-        comment = body.comment
-        frontend_url = settings.frontend_url
-        if body.graphics_status:
-            def _ng(s="graphics", v=body.graphics_status) -> None:
-                text, html = render_task_status_changed(company, s, v, comment, frontend_url)
-                asyncio.run(send_email(email_addr, "ATO COMM — Graphics status updated", text, html))
+    company = ex.company_name
+    email_addr = u.email if u else None
+    comment = body.comment
+    frontend_url = settings.frontend_url
 
-            background_tasks.add_task(_ng)
-        if body.company_status:
-            def _nc(s="company", v=body.company_status) -> None:
-                text, html = render_task_status_changed(company, s, v, comment, frontend_url)
-                asyncio.run(send_email(email_addr, "ATO COMM — Description status updated", text, html))
+    def _emit(section: str, value: str, subject: str) -> None:
+        text, html = render_task_status_changed(company, section, value, comment, frontend_url)
+        if email_addr:
+            def _to_exhibitor(addr=email_addr) -> None:
+                asyncio.run(send_email(addr, subject, text, html))
 
-            background_tasks.add_task(_nc)
-        if body.participants_status:
-            def _np(s="participants", v=body.participants_status) -> None:
-                text, html = render_task_status_changed(company, s, v, comment, frontend_url)
-                asyncio.run(send_email(email_addr, "ATO COMM — Participants status updated", text, html))
+            background_tasks.add_task(_to_exhibitor)
+        _notify_event_team_status(db, background_tasks, ex.event_id, subject, text, html)
 
-            background_tasks.add_task(_np)
+    if body.graphics_status:
+        _emit("graphics", body.graphics_status, "ATO COMM — Graphics status updated")
+    if body.company_status:
+        _emit("company", body.company_status, "ATO COMM — Description status updated")
+    if body.participants_status:
+        _emit("participants", body.participants_status, "ATO COMM — Participants status updated")
     return {"status": "ok"}
 
 
@@ -1178,3 +1288,146 @@ def list_faq_admin(event_id: Optional[int] = None, db: Session = Depends(get_db)
         {"id": f.id, "event_id": f.event_id, "question": f.question, "answer": f.answer, "sort_order": f.sort_order}
         for f in q.order_by(FaqItem.sort_order).all()
     ]
+
+
+# ── Managers (organizer-side users) ───────────────────────────────────────────
+
+def _manager_payload(u: User) -> Dict[str, Any]:
+    return {
+        "id": u.id,
+        "email": u.email,
+        "full_name": u.full_name or "",
+        "is_active": u.is_active,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+    }
+
+
+@router.get("/managers", dependencies=[Depends(require_admin)])
+def list_managers(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    rows = (
+        db.query(User)
+        .filter(User.role == UserRole.MANAGER.value)
+        .order_by(User.full_name.asc(), User.email.asc())
+        .all()
+    )
+    return [_manager_payload(u) for u in rows]
+
+
+@router.post("/managers")
+def create_manager(
+    body: ManagerCreate,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    email = str(body.email)
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        raise HTTPException(409, "A user with this email already exists")
+    pwd = _random_password()
+    u = User(
+        email=email,
+        full_name=(body.full_name or None),
+        hashed_password=hash_password(pwd),
+        role=UserRole.MANAGER.value,
+        is_active=True,
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    log_event(
+        db,
+        user_id=admin.id,
+        event_type="admin_create_manager",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        payload={"manager_id": u.id, "email": email},
+    )
+    if body.send_welcome and settings.smtp_host:
+        login_url = f"{settings.frontend_url}/login"
+        text, html = render_welcome_manager(login_url, email, pwd)
+
+        def _send() -> None:
+            asyncio.run(send_email(email, "ATO COMM — Management Portal access", text, html))
+
+        background_tasks.add_task(_send)
+    payload = _manager_payload(u)
+    payload["temporary_password"] = pwd
+    return payload
+
+
+@router.patch("/managers/{manager_id}")
+def update_manager(
+    manager_id: int,
+    body: ManagerUpdate,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    u = db.query(User).filter(User.id == manager_id, User.role == UserRole.MANAGER.value).first()
+    if not u:
+        raise HTTPException(404, "Manager not found")
+    if body.full_name is not None:
+        u.full_name = body.full_name or None
+    if body.is_active is not None:
+        u.is_active = body.is_active
+    db.commit()
+    db.refresh(u)
+    return _manager_payload(u)
+
+
+@router.post("/managers/{manager_id}/reset-password")
+def reset_manager_password(
+    manager_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    u = db.query(User).filter(User.id == manager_id, User.role == UserRole.MANAGER.value).first()
+    if not u:
+        raise HTTPException(404, "Manager not found")
+    new_pwd = _random_password()
+    u.hashed_password = hash_password(new_pwd)
+    db.commit()
+    if settings.smtp_host:
+        login_url = f"{settings.frontend_url}/login"
+        email_addr = u.email
+        text, html = render_password_reset(login_url, email_addr, new_pwd)
+
+        def _send() -> None:
+            asyncio.run(send_email(email_addr, "ATO COMM — Your password has been reset", text, html))
+
+        background_tasks.add_task(_send)
+    return {"status": "ok", "temporary_password": new_pwd}
+
+
+@router.delete("/managers/{manager_id}")
+def deactivate_manager(
+    manager_id: int,
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Soft-disable a manager: deactivates the account and removes them from any
+    event responsible/observer assignments. The account is kept for audit history."""
+    u = db.query(User).filter(User.id == manager_id, User.role == UserRole.MANAGER.value).first()
+    if not u:
+        raise HTTPException(404, "Manager not found")
+    u.is_active = False
+    # Detach from event teams so notifications stop routing to them
+    db.query(Event).filter(Event.responsible_id == manager_id).update(
+        {Event.responsible_id: None}, synchronize_session=False
+    )
+    for ev in db.query(Event).filter(Event.observer_ids.isnot(None)).all():
+        obs = list(ev.observer_ids or [])
+        if manager_id in obs:
+            ev.observer_ids = [i for i in obs if i != manager_id]
+    db.commit()
+    log_event(
+        db,
+        user_id=admin.id,
+        event_type="admin_deactivate_manager",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        payload={"manager_id": manager_id, "email": u.email},
+    )
+    return {"status": "deactivated", "manager_id": manager_id}

@@ -38,6 +38,15 @@ class Event(Base):
     # Event lifecycle status
     status: Mapped[str] = mapped_column(String(32), default="upcoming")
 
+    # Event team — one responsible manager + any number of observers.
+    # All event notifications (exhibitor submissions, status changes) are routed
+    # to the responsible person and observers.
+    responsible_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # List of user ids (managers) who observe this event.
+    observer_ids: Mapped[List[Any]] = mapped_column(JSONB, default=list)
+
     # Available stand slot configuration per package (legacy — kept for backward compat)
     # {"SHELL_ONLY": {"enabled": true, "count": 10, "area_m2": 9}, ...}
     stand_slots: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)

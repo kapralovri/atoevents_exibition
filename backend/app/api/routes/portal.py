@@ -18,7 +18,7 @@ from app.models.faq import FaqItem
 from app.models.graphic import GraphicUpload
 from app.models.participant import Participant
 from app.models.company import CompanyProfile
-from app.models.user import User, UserRole
+from app.models.user import User, is_staff
 from app.schemas.portal import (
     ChangeRequestBody,
     CompanyProfileUpdate,
@@ -37,6 +37,7 @@ from app.services.audit_service import log_event
 from app.services.deadlines import refresh_exhibitor_locks
 from app.services.email_service import (
     notify_admin_change_request,
+    notify_admin_description_submitted,
     notify_admin_equipment,
     notify_admin_new_upload,
     notify_admin_participants_submitted,
@@ -47,16 +48,29 @@ from app.services.graphics_validation import (
     build_preview_jpeg_from_path,
     validate_graphic_from_path,
 )
+from app.services.recipients import event_recipient_emails
 from app.services.stand_matrix import slots_for_exhibitor, slot_dict_for_api, get_overlay_zones
 
 router = APIRouter(prefix="/portal", tags=["portal"])
+
+
+def _dispatch_email(background_tasks: BackgroundTasks, recipients: List[str], subject: str, text: str, html: str) -> None:
+    """Schedule a background send of one message to each recipient."""
+    if not background_tasks or not recipients:
+        return
+
+    def _send() -> None:
+        for addr in recipients:
+            asyncio.run(send_email(addr, subject, text, html))
+
+    background_tasks.add_task(_send)
 
 
 def _get_exhibitor(db: Session, exhibitor_id: int, user: User) -> Exhibitor:
     ex = db.query(Exhibitor).filter(Exhibitor.id == exhibitor_id).first()
     if not ex:
         raise HTTPException(404, "Exhibitor not found")
-    if user.role != UserRole.ADMIN.value and ex.user_id != user.id:
+    if not is_staff(user.role) and ex.user_id != user.id:
         raise HTTPException(403, "Forbidden")
     return ex
 
@@ -87,8 +101,10 @@ def _resolve_backdrop_key(ev: Event, ex: "Exhibitor") -> "str | None":
 
 @router.get("/me")
 def me(user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)) -> Dict[str, Any]:
-    if user.role == UserRole.ADMIN.value:
-        return {"role": "admin", "email": user.email}
+    # Managers share the admin panel — report them as "admin" so the frontend
+    # routes them to /admin. The actual role is exposed separately for display.
+    if is_staff(user.role):
+        return {"role": "admin", "actual_role": user.role, "email": user.email}
     rows = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).all()
     return {
         "role": "exhibitor",
@@ -311,6 +327,7 @@ def me_patch_company(
 
 @router.post("/me/exhibitor/description/submit")
 def me_submit_description(
+    background_tasks: BackgroundTasks,
     user: Annotated[User, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:
@@ -322,6 +339,10 @@ def me_submit_description(
         raise HTTPException(403, "Locked")
     ex.company_status = "UNDER_REVIEW"
     db.commit()
+    ev = db.query(Event).filter(Event.id == ex.event_id).first()
+    recipients = event_recipient_emails(db, ev)
+    sub, text, html = notify_admin_description_submitted(ex.company_name, ev.name if ev else "")
+    _dispatch_email(background_tasks, recipients, sub, text, html)
     return {"status": "ok"}
 
 
@@ -687,14 +708,11 @@ def _finalize_graphic_upload(
         payload={"exhibitor_id": ex.id, "slot_key": slot_key},
     )
 
-    if background_tasks and settings.admin_notify_email:
+    if background_tasks:
         ev = _event(db, ex.event_id)
-
-        def _notify() -> None:
-            sub, text, html = notify_admin_new_upload(ex.company_name, ev.name)
-            asyncio.run(send_email(settings.admin_notify_email, sub, text, html))
-
-        background_tasks.add_task(_notify)
+        recipients = event_recipient_emails(db, ev)
+        sub, text, html = notify_admin_new_upload(ex.company_name, ev.name)
+        _dispatch_email(background_tasks, recipients, sub, text, html)
 
     return {"graphic_upload_id": gu.id, "validation_status": "UNDER_REVIEW"}
 
@@ -893,6 +911,7 @@ def patch_company(
 @router.post("/exhibitors/{exhibitor_id}/company/submit")
 def submit_company(
     exhibitor_id: int,
+    background_tasks: BackgroundTasks,
     user: Annotated[User, Depends(get_current_user)],
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:
@@ -901,6 +920,10 @@ def submit_company(
         raise HTTPException(403, "Locked")
     ex.company_status = "UNDER_REVIEW"
     db.commit()
+    ev = db.query(Event).filter(Event.id == ex.event_id).first()
+    recipients = event_recipient_emails(db, ev)
+    sub, text, html = notify_admin_description_submitted(ex.company_name, ev.name if ev else "")
+    _dispatch_email(background_tasks, recipients, sub, text, html)
     return {"status": "ok"}
 
 
@@ -992,17 +1015,12 @@ def submit_participants(
         raise HTTPException(403, "Locked")
     ex.participants_status = "SUBMITTED"
     db.commit()
-    if settings.admin_notify_email:
-        ev = db.query(Event).filter(Event.id == ex.event_id).first()
+    ev = db.query(Event).filter(Event.id == ex.event_id).first()
+    recipients = event_recipient_emails(db, ev)
+    if recipients:
         count = db.query(Participant).filter(Participant.exhibitor_id == exhibitor_id).count()
-        company = ex.company_name
-        event_name = ev.name if ev else ""
-
-        def _notify() -> None:
-            sub, text, html = notify_admin_participants_submitted(company, event_name, count)
-            asyncio.run(send_email(settings.admin_notify_email, sub, text, html))
-
-        background_tasks.add_task(_notify)
+        sub, text, html = notify_admin_participants_submitted(ex.company_name, ev.name if ev else "", count)
+        _dispatch_email(background_tasks, recipients, sub, text, html)
     return {"status": "ok"}
 
 
@@ -1033,13 +1051,9 @@ def submit_equipment(
     db.refresh(order)
 
     lines = [{"name": it.name, "quantity": it.quantity} for it in body.items]
-
-    def _notify() -> None:
-        sub, text, html = notify_admin_equipment(ex.company_name, ev.name, lines)
-        asyncio.run(send_email(settings.admin_notify_email, sub, text, html))
-
-    if background_tasks and settings.admin_notify_email:
-        background_tasks.add_task(_notify)
+    recipients = event_recipient_emails(db, ev)
+    sub, text, html = notify_admin_equipment(ex.company_name, ev.name, lines)
+    _dispatch_email(background_tasks, recipients, sub, text, html)
     return {"order_id": order.id}
 
 
@@ -1057,12 +1071,10 @@ def change_request(
     db.commit()
     db.refresh(cr)
 
-    def _notify() -> None:
-        sub, text, html = notify_admin_change_request(ex.company_name, body.section, body.message or "")
-        asyncio.run(send_email(settings.admin_notify_email, sub, text, html))
-
-    if background_tasks and settings.admin_notify_email:
-        background_tasks.add_task(_notify)
+    ev = db.query(Event).filter(Event.id == ex.event_id).first()
+    recipients = event_recipient_emails(db, ev)
+    sub, text, html = notify_admin_change_request(ex.company_name, body.section, body.message or "")
+    _dispatch_email(background_tasks, recipients, sub, text, html)
     return {"id": cr.id}
 
 
@@ -1073,7 +1085,7 @@ def list_documents(
     db: Session = Depends(get_db),
 ) -> List[Dict[str, Any]]:
     ex_rows = db.query(Exhibitor).filter(Exhibitor.user_id == user.id, Exhibitor.event_id == event_id).all()
-    if user.role != UserRole.ADMIN.value and not ex_rows:
+    if not is_staff(user.role) and not ex_rows:
         raise HTTPException(403, "Forbidden")
     docs = db.query(EventDocument).filter(EventDocument.event_id == event_id).all()
     return [
