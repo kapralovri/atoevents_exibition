@@ -21,6 +21,8 @@ import {
   UserX,
   UserCheck,
   ShieldCheck,
+  Pencil,
+  Loader2,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
@@ -78,6 +80,11 @@ export default function AdminManagersPage() {
   const [created, setCreated] = useState<CreatedCredentials | null>(null);
   const [copied, setCopied] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // Edit
+  const [editing, setEditing] = useState<Manager | null>(null);
+  const [editForm, setEditForm] = useState<{ full_name: string; email: string }>({ full_name: "", email: "" });
+  const [editErrors, setEditErrors] = useState<{ full_name?: string; email?: string }>({});
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
     loadManagers();
@@ -148,6 +155,40 @@ export default function AdminManagersPage() {
       toast.error(err instanceof Error ? err.message : "Action failed");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  function openEdit(m: Manager) {
+    setEditing(m);
+    setEditForm({ full_name: m.full_name || "", email: m.email });
+    setEditErrors({});
+  }
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editing) return;
+    const errs: { full_name?: string; email?: string } = {};
+    if (!editForm.email || !validateEmail(editForm.email)) errs.email = "Valid email required";
+    if (editForm.full_name && editForm.full_name.trim().length < 2) errs.full_name = "Too short";
+    setEditErrors(errs);
+    if (Object.keys(errs).length) return;
+    setIsSavingEdit(true);
+    try {
+      await apiFetch(`/admin/managers/${editing.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: editForm.email.trim(),
+          full_name: editForm.full_name.trim() || null,
+        }),
+      });
+      toast.success("Manager updated");
+      setEditing(null);
+      await loadManagers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setIsSavingEdit(false);
     }
   }
 
@@ -434,6 +475,15 @@ export default function AdminManagersPage() {
               {/* Actions */}
               <div className="flex items-center justify-end gap-1">
                 <button
+                  onClick={() => openEdit(m)}
+                  disabled={busyId === m.id}
+                  title="Edit"
+                  className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted disabled:opacity-40 transition-colors"
+                  style={{ color: "hsl(210 12% 45%)" }}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
                   onClick={() => resetPassword(m)}
                   disabled={busyId === m.id || !m.is_active}
                   title="Reset password"
@@ -454,6 +504,82 @@ export default function AdminManagersPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── Edit modal ── */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(15,23,42,0.55)", backdropFilter: "blur(4px)" }}>
+          <div className="w-full max-w-md rounded-2xl bg-white border border-border shadow-2xl p-6 space-y-5 animate-fade-up">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ background: "hsl(209 65% 21% / 0.08)" }}>
+                  <Pencil className="h-4 w-4" style={{ color: "hsl(209 65% 38%)" }} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Edit Manager</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">Update name and email address</p>
+                </div>
+              </div>
+              <button onClick={() => setEditing(null)}
+                className="h-7 w-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors shrink-0 mt-0.5">
+                <X className="h-4 w-4 text-muted-foreground" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit_full_name" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Full Name
+                </Label>
+                <Input
+                  id="edit_full_name"
+                  value={editForm.full_name}
+                  onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
+                  placeholder="Anastasia Zamotina"
+                  className={editErrors.full_name ? "border-red-400" : ""}
+                />
+                {editErrors.full_name && <p className="text-xs text-red-500 mt-1">{editErrors.full_name}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit_email" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Email<span className="text-red-500 ml-0.5">*</span>
+                </Label>
+                <Input
+                  id="edit_email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                  placeholder="name@atocomm.eu"
+                  className={editErrors.email ? "border-red-400" : ""}
+                />
+                {editErrors.email && <p className="text-xs text-red-500 mt-1">{editErrors.email}</p>}
+                <p className="text-[11px] text-muted-foreground">
+                  Changing the email also changes this manager&apos;s login.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setEditing(null)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isSavingEdit} className="flex-1 gap-2">
+                  {isSavingEdit ? (
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

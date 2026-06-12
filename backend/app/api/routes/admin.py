@@ -109,6 +109,7 @@ class ManagerCreate(BaseModel):
 
 
 class ManagerUpdate(BaseModel):
+    email: Optional[EmailStr] = None
     full_name: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -1367,6 +1368,13 @@ def update_manager(
     u = db.query(User).filter(User.id == manager_id, User.role == UserRole.MANAGER.value).first()
     if not u:
         raise HTTPException(404, "Manager not found")
+    if body.email is not None:
+        new_email = str(body.email)
+        if new_email != u.email:
+            clash = db.query(User).filter(User.email == new_email, User.id != manager_id).first()
+            if clash:
+                raise HTTPException(409, "A user with this email already exists")
+            u.email = new_email
     if body.full_name is not None:
         u.full_name = body.full_name or None
     if body.is_active is not None:
