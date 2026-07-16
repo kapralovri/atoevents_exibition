@@ -42,11 +42,11 @@ export default function LoginPage() {
 
       {/* ── Left: Hero image panel ─────────────────────────────── */}
       <div className="hidden lg:block lg:w-[55%] relative overflow-hidden">
-        {/* Background — uses hero.jpg if placed in /public, otherwise CSS fallback */}
+        {/* Background — gradient panel; to use a photo, add hero.jpg to /public and prepend url('/hero.jpg') here */}
         <div
           className="absolute inset-0"
           style={{
-            backgroundImage: "url('/hero.jpg'), linear-gradient(135deg, hsl(215 60% 8%) 0%, hsl(209 65% 14%) 50%, hsl(200 50% 18%) 100%)",
+            backgroundImage: "linear-gradient(135deg, hsl(215 60% 8%) 0%, hsl(209 65% 14%) 50%, hsl(200 50% 18%) 100%)",
             backgroundSize: "cover",
             backgroundPosition: "center 30%",
           }}

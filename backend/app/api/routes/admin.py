@@ -530,6 +530,24 @@ def get_stand_availability(event_id: int, db: Session = Depends(get_db)) -> List
 
 # ── Document + backdrop endpoints ─────────────────────────────────────────────
 
+@router.get("/events/{event_id}/documents", dependencies=[Depends(require_admin)])
+def list_event_documents(event_id: int, db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    return [
+        {
+            "id": d.id,
+            "doc_type": d.doc_type,
+            "title": d.title,
+            "s3_key": d.s3_key,
+            "version_label": d.version_label,
+            "created_at": d.created_at.isoformat(),
+        }
+        for d in ev.documents
+    ]
+
+
 @router.post("/events/{event_id}/documents/presign", dependencies=[Depends(require_admin)])
 def presign_event_document(event_id: int, body: DocPresignBody, db: Session = Depends(get_db)) -> Dict[str, str]:
     ev = db.query(Event).filter(Event.id == event_id).first()
