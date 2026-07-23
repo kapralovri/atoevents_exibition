@@ -114,7 +114,7 @@ def expected_pixel_range(
 def _fascia_slots(cfg: str, area_m2: float, height_mm: float, is_bespoke: bool = False) -> list[GraphicSlot]:
     """Return fascia slot(s) for the given configuration.
 
-    Stand depth is always 3 m (торец = 3000 мм).
+    Stand depth is always 3 m (end face = 3000 mm).
     Fascia width = length of the open facade side.
     Facade length = area_m2 / 3 * 1000 mm  (e.g. 9 m² / 3 × 1000 = 3000 mm).
 

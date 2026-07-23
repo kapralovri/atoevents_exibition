@@ -27,7 +27,7 @@ class Event(Base):
 
     reminder_offsets_days: Mapped[List[Any]] = mapped_column(JSONB, default=list)  # e.g. [30, 14, 7, 3, 1]
 
-    # Stand display aliases (STАРТ/ПРО/ИНДИВИДУАЛ ↔ internal codes)
+    # Stand display aliases (START/PRO/INDIVIDUAL ↔ internal codes)
     alias_shell: Mapped[str] = mapped_column(String(64), default="START")
     alias_system: Mapped[str] = mapped_column(String(64), default="PRO")
     alias_bespoke: Mapped[str] = mapped_column(String(64), default="INDIVIDUAL")

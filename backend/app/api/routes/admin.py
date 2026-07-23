@@ -65,9 +65,9 @@ class EventCreate(BaseModel):
     venue_address: Optional[str] = None
     website_url: Optional[str] = None
     status: str = "upcoming"
-    alias_shell: str = "СТАРТ"
-    alias_system: str = "ПРО"
-    alias_bespoke: str = "ИНДИВИДУАЛ"
+    alias_shell: str = "START"
+    alias_system: str = "PRO"
+    alias_bespoke: str = "INDIVIDUAL"
     stand_slots: Optional[Dict[str, Any]] = None
     stand_inventory: Optional[List[StandInventoryItem]] = None
     deadline_graphics_initial: Optional[date] = None
