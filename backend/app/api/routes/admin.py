@@ -16,6 +16,7 @@ from app.api.deps import get_db, require_admin
 from app.config import settings
 from app.core.security import hash_password
 from app.models.audit import AuditLog
+from app.models.equipment import EquipmentOrder
 from app.models.event import Event, EventDocument
 from app.models.exhibitor import Exhibitor
 from app.models.faq import FaqItem
@@ -1457,3 +1458,73 @@ def deactivate_manager(
         payload={"manager_id": manager_id, "email": u.email},
     )
     return {"status": "deactivated", "manager_id": manager_id}
+
+
+# ── Sponsorship / equipment orders ────────────────────────────────────────────
+
+ORDER_STATUSES = ("SUBMITTED", "INVOICE_SENT", "PAID")
+
+
+class OrderStatusBody(BaseModel):
+    status: str = Field(..., pattern="^(SUBMITTED|INVOICE_SENT|PAID)$")
+
+
+@router.get("/orders", dependencies=[Depends(require_admin)])
+def list_orders(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    rows = (
+        db.query(EquipmentOrder, Exhibitor, Event)
+        .join(Exhibitor, EquipmentOrder.exhibitor_id == Exhibitor.id)
+        .join(Event, Exhibitor.event_id == Event.id)
+        .order_by(EquipmentOrder.created_at.desc())
+        .all()
+    )
+    result = []
+    for order, ex, ev in rows:
+        items = [
+            {
+                "sku": li.sku,
+                "name": li.name,
+                "quantity": li.quantity,
+                "unit_price": li.unit_price,
+                "line_total": (li.unit_price or 0) * li.quantity,
+            }
+            for li in order.line_items
+        ]
+        result.append({
+            "id": order.id,
+            "status": order.status,
+            "notes": order.notes,
+            "created_at": order.created_at.isoformat(),
+            "company_name": ex.company_name,
+            "exhibitor_id": ex.id,
+            "event_id": ev.id,
+            "event_name": ev.name,
+            "items": items,
+            "total": sum(i["line_total"] for i in items),
+        })
+    return result
+
+
+@router.patch("/orders/{order_id}")
+def update_order_status(
+    order_id: int,
+    body: OrderStatusBody,
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    order = db.query(EquipmentOrder).filter(EquipmentOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    old = order.status
+    order.status = body.status
+    log_event(
+        db,
+        user_id=admin.id,
+        event_type="admin_update_order_status",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        payload={"order_id": order_id, "from": old, "to": body.status},
+    )
+    db.commit()
+    return {"status": "ok", "order_id": order_id, "order_status": order.status}

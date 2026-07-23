@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
+  ReceiptText,
   UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,7 @@ interface NavItem {
   icon: React.ElementType;
   role: "exhibitor" | "admin" | "both";
   section?: "main" | "workspace";
+  badge?: "sale";
 }
 
 const navItems: NavItem[] = [
@@ -32,11 +34,12 @@ const navItems: NavItem[] = [
   { title: "Dashboard",       href: "/dashboard",       icon: LayoutDashboard, role: "exhibitor", section: "main" },
   { title: "Events",          href: "/events",           icon: Calendar,        role: "exhibitor", section: "main" },
   { title: "Tasks",           href: "/tasks",            icon: CheckSquare,     role: "exhibitor", section: "main" },
-  { title: "Equipment",       href: "/equipment",        icon: ShoppingCart,    role: "exhibitor", section: "main" },
+  { title: "Equipment",       href: "/equipment",        icon: ShoppingCart,    role: "exhibitor", section: "main", badge: "sale" },
   { title: "Exb Manuals",     href: "/manuals",          icon: BookOpen,        role: "exhibitor", section: "main" },
   { title: "Setup Schedule",  href: "/setup-schedule",   icon: CalendarDays,    role: "exhibitor", section: "main" },
   // Admin
   { title: "Events",          href: "/admin/events",     icon: Calendar,        role: "admin", section: "main" },
+  { title: "Orders",          href: "/admin/orders",     icon: ReceiptText,     role: "admin", section: "main" },
   { title: "Tasks",           href: "/admin/tasks",      icon: CheckSquare,     role: "admin", section: "main" },
   { title: "Managers",        href: "/admin/managers",   icon: UsersRound,      role: "admin", section: "main" },
   { title: "Audit Log",       href: "/admin/audit",      icon: ClipboardList,   role: "admin", section: "main" },
@@ -198,12 +201,28 @@ export function Sidebar({
                       style={{ background: "hsl(168 55% 42%)" }}
                     />
                   )}
-                  <Icon
-                    className="h-4 w-4 shrink-0"
-                    style={isActive ? { color: "hsl(168 55% 34%)" } : undefined}
-                  />
+                  <span className="relative shrink-0 flex">
+                    <Icon
+                      className="h-4 w-4"
+                      style={isActive ? { color: "hsl(168 55% 34%)" } : undefined}
+                    />
+                    {item.badge === "sale" && isCollapsed && (
+                      <span
+                        className="absolute -top-1 -right-1 h-2 w-2 rounded-full"
+                        style={{ background: "hsl(0 72% 50%)", boxShadow: "0 0 4px hsl(0 72% 50% / 0.6)" }}
+                      />
+                    )}
+                  </span>
                   {!isCollapsed && (
                     <span className="flex-1 truncate">{item.title}</span>
+                  )}
+                  {item.badge === "sale" && !isCollapsed && (
+                    <span
+                      className="shrink-0 rounded-full px-1.5 py-[1px] text-[9px] font-extrabold uppercase tracking-wider text-white"
+                      style={{ background: "hsl(0 72% 50%)", boxShadow: "0 1px 4px hsl(0 72% 50% / 0.4)" }}
+                    >
+                      Sale
+                    </span>
                   )}
                 </Link>
               </li>

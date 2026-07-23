@@ -49,6 +49,7 @@ from app.services.graphics_validation import (
     validate_graphic_from_path,
 )
 from app.services.recipients import event_recipient_emails
+from app.services.sponsorship_catalog import CATALOG, SHOP_DISCOUNT_PERCENT, get_item
 from app.services.stand_matrix import slots_for_exhibitor, slot_dict_for_api, get_overlay_zones
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -1024,6 +1025,13 @@ def submit_participants(
     return {"status": "ok"}
 
 
+@router.get("/shop/catalog")
+def shop_catalog(
+    user: Annotated[User, Depends(get_current_user)],
+) -> Dict[str, Any]:
+    return {"discount_percent": SHOP_DISCOUNT_PERCENT, "categories": CATALOG}
+
+
 @router.post("/exhibitors/{exhibitor_id}/equipment")
 def submit_equipment(
     exhibitor_id: int,
@@ -1034,23 +1042,34 @@ def submit_equipment(
 ) -> dict[str, int]:
     ex = _get_exhibitor(db, exhibitor_id, user)
     ev = _event(db, ex.event_id)
+    if not body.items:
+        raise HTTPException(400, "Order is empty")
     order = EquipmentOrder(exhibitor_id=exhibitor_id, notes=body.notes)
     db.add(order)
     db.flush()
     for it in body.items:
+        # Name and price come from the server-side catalog, never from the client.
+        cat_item = get_item(it.sku)
+        if cat_item is None:
+            raise HTTPException(400, f"Unknown catalog item: {it.sku}")
+        if it.quantity < 1 or it.quantity > 999:
+            raise HTTPException(400, "Quantity must be between 1 and 999")
         db.add(
             EquipmentLineItem(
                 order_id=order.id,
                 sku=it.sku,
-                name=it.name,
+                name=cat_item["name"],
                 quantity=it.quantity,
-                unit_price=it.unit_price,
+                unit_price=cat_item["price"],
             )
         )
     db.commit()
     db.refresh(order)
 
-    lines = [{"name": it.name, "quantity": it.quantity} for it in body.items]
+    lines = [
+        {"name": get_item(it.sku)["name"], "quantity": it.quantity}
+        for it in body.items
+    ]
     recipients = event_recipient_emails(db, ev)
     sub, text, html = notify_admin_equipment(ex.company_name, ev.name, lines)
     _dispatch_email(background_tasks, recipients, sub, text, html)
