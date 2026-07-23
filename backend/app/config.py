@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 500 * 1024 * 1024
     preview_max_bytes: int = 1024 * 1024
 
+    # Rate limiting (in-memory, per worker process)
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 300          # global, per client IP
+    login_rate_limit_per_minute: int = 10     # POST /auth/login, per client IP
+    login_max_failures: int = 5               # per email, then lockout
+    login_failure_window_minutes: int = 15
+    login_lockout_minutes: int = 15
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
