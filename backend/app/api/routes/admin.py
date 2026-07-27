@@ -879,9 +879,27 @@ def update_exhibitor(
         new_email = str(body.email)
         u = db.query(User).filter(User.id == ex.user_id).first()
         if u and new_email != u.email:
+            if is_staff(u.role):
+                # This exhibitor's login is shared with an admin/manager account
+                # (data bug from an earlier import) — renaming here would rename
+                # that staff member's own login and lock them out. Needs a data
+                # migration to split the accounts first, not a silent rename.
+                raise HTTPException(
+                    409,
+                    "This exhibitor's account is shared with a staff (admin/manager) login "
+                    "and cannot be renamed here — it needs to be split into a separate "
+                    "account first.",
+                )
             clash = db.query(User).filter(User.email == new_email, User.id != u.id).first()
             if clash:
                 raise HTTPException(409, "A user with this email already exists")
+            other_stands = (
+                db.query(Exhibitor.id)
+                .filter(Exhibitor.user_id == u.id, Exhibitor.id != exhibitor_id)
+                .count()
+            )
+            if other_stands:
+                changes["email_shared_with_stands"] = other_stands
             changes["email"] = {"from": u.email, "to": new_email}
             u.email = new_email
 
