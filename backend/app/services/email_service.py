@@ -1,9 +1,12 @@
+import logging
 from email.message import EmailMessage
 from typing import Any, Optional, List, Dict, Tuple
 
 import aiosmtplib
 
 from app.config import settings
+
+logger = logging.getLogger("app.email")
 
 # ── Brand constants ───────────────────────────────────────────────────────────
 _GREEN = "#00FC90"
@@ -197,6 +200,28 @@ def _comment_box(comment: str) -> str:
 
 # ── Core SMTP sender ──────────────────────────────────────────────────────────
 
+def _log_email_event(event_type: str, to: str, subject: str, error: Optional[str] = None) -> None:
+    """Best-effort audit trail for email delivery — this is our only durable
+    record: sends happen in fire-and-forget background tasks, so an
+    exception there never reaches the request/response cycle or gets
+    surfaced anywhere else, and container log lines don't survive a
+    redeploy."""
+    try:
+        from app.db.session import SessionLocal
+        from app.services.audit_service import log_event
+
+        db = SessionLocal()
+        try:
+            payload: Dict[str, Any] = {"to": to, "subject": subject}
+            if error:
+                payload["error"] = error
+            log_event(db, user_id=None, event_type=event_type, payload=payload)
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("Failed to write email audit log entry (to=%s)", to)
+
+
 async def send_email(
     to: str,
     subject: str,
@@ -204,6 +229,8 @@ async def send_email(
     body_html: Optional[str] = None,
 ) -> None:
     if not settings.smtp_host:
+        logger.warning("Email NOT sent — SMTP not configured: to=%s subject=%r", to, subject)
+        _log_email_event("email_skipped_no_smtp", to, subject)
         return
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -212,14 +239,21 @@ async def send_email(
     msg.set_content(body_text)
     if body_html:
         msg.add_alternative(body_html, subtype="html")
-    await aiosmtplib.send(
-        msg,
-        hostname=settings.smtp_host,
-        port=settings.smtp_port,
-        username=settings.smtp_user or None,
-        password=settings.smtp_password or None,
-        start_tls=True,
-    )
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=settings.smtp_host,
+            port=settings.smtp_port,
+            username=settings.smtp_user or None,
+            password=settings.smtp_password or None,
+            start_tls=True,
+        )
+    except Exception as exc:
+        logger.error("Email send FAILED: to=%s subject=%r error=%s: %s", to, subject, type(exc).__name__, exc)
+        _log_email_event("email_send_failed", to, subject, error=f"{type(exc).__name__}: {exc}")
+        return
+    logger.info("Email sent: to=%s subject=%r", to, subject)
+    _log_email_event("email_sent", to, subject)
 
 
 # ── Exhibitor-facing templates ────────────────────────────────────────────────
