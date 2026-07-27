@@ -35,6 +35,7 @@ import {
   Pencil,
   X,
   KeyRound,
+  Trash2,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
@@ -101,6 +102,12 @@ export default function AdminExhibitorDetailPage() {
   const [comments, setComments] = useState<Record<string, string>>({});
   const [taskComments, setTaskComments] = useState<Record<string, string>>({});
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Edit email state
+  const [showEditEmail, setShowEditEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [isSavingEmail, setIsSavingEmail] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Edit stand state
   const [showEditStand, setShowEditStand] = useState(false);
@@ -315,6 +322,49 @@ export default function AdminExhibitorDetailPage() {
     }
   };
 
+  const handleSaveEmail = async () => {
+    const next = emailDraft.trim();
+    if (!next || next === exhibitor?.email) {
+      setShowEditEmail(false);
+      return;
+    }
+    setIsSavingEmail(true);
+    try {
+      await apiFetch(`/admin/exhibitors/${exhibitorId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: next }),
+      });
+      toast.success("Email updated");
+      const data = await apiFetch<Exhibitor>(`/admin/exhibitors/${exhibitorId}`);
+      setExhibitor(data);
+      setShowEditEmail(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update email");
+    } finally {
+      setIsSavingEmail(false);
+    }
+  };
+
+  const handleDeleteExhibitor = async () => {
+    if (!exhibitor) return;
+    if (
+      !confirm(
+        `Delete ${exhibitor.company_name}?\nThis permanently removes their graphics, participants, and orders. This cannot be undone.`
+      )
+    )
+      return;
+    setIsDeleting(true);
+    try {
+      await apiFetch(`/admin/exhibitors/${exhibitorId}`, { method: "DELETE" });
+      toast.success("Exhibitor deleted");
+      router.push(exhibitor.event_id ? `/admin/events/${exhibitor.event_id}` : "/admin/events");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete exhibitor");
+      setIsDeleting(false);
+    }
+  };
+
   const handleSaveStand = async () => {
     setIsSavingStand(true);
     try {
@@ -395,10 +445,50 @@ export default function AdminExhibitorDetailPage() {
               <div>
                 <h1 className="page-title">{exhibitor.company_name}</h1>
                 <div className="flex flex-wrap items-center gap-3 mt-1.5">
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Mail className="h-3 w-3" />
-                    {exhibitor.email}
-                  </span>
+                  {showEditEmail ? (
+                    <span className="flex items-center gap-1.5">
+                      <Mail className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <input
+                        type="email"
+                        value={emailDraft}
+                        onChange={(e) => setEmailDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveEmail();
+                          if (e.key === "Escape") setShowEditEmail(false);
+                        }}
+                        autoFocus
+                        className="h-6 rounded border border-slate-300 px-1.5 text-xs outline-none focus:border-slate-500"
+                        style={{ minWidth: 200 }}
+                      />
+                      <button
+                        onClick={handleSaveEmail}
+                        disabled={isSavingEmail}
+                        className="text-xs font-semibold"
+                        style={{ color: "hsl(154 60% 35%)" }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setShowEditEmail(false)}
+                        className="text-muted-foreground"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground group"
+                      onClick={() => {
+                        setEmailDraft(exhibitor.email);
+                        setShowEditEmail(true);
+                      }}
+                      title="Change email"
+                    >
+                      <Mail className="h-3 w-3" />
+                      {exhibitor.email}
+                      <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity" />
+                    </button>
+                  )}
                   <StatusBadge status={exhibitor.overall_status} />
                   {totalPendingReview > 0 && (
                     <span
@@ -442,6 +532,17 @@ export default function AdminExhibitorDetailPage() {
                   Unlock
                 </Button>
               )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                style={{ color: "hsl(0 72% 45%)", borderColor: "hsl(0 72% 88%)" }}
+                onClick={handleDeleteExhibitor}
+                disabled={isDeleting}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
             </div>
           </div>
 

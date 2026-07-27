@@ -129,6 +129,7 @@ class ExhibitorCreate(BaseModel):
 
 class ExhibitorUpdate(BaseModel):
     company_name: Optional[str] = None
+    email: Optional[EmailStr] = None
     stand_inventory_id: Optional[str] = None
     stand_package: Optional[str] = Field(None, pattern="^(SHELL_ONLY|SYSTEM|BESPOKE)$")
     stand_configuration: Optional[str] = Field(None, pattern="^(LINEAR|ANGULAR|PENINSULA|ISLAND)$")
@@ -874,6 +875,16 @@ def update_exhibitor(
         if ex.company_profile:
             ex.company_profile.company_name = body.company_name
 
+    if body.email is not None:
+        new_email = str(body.email)
+        u = db.query(User).filter(User.id == ex.user_id).first()
+        if u and new_email != u.email:
+            clash = db.query(User).filter(User.email == new_email, User.id != u.id).first()
+            if clash:
+                raise HTTPException(409, "A user with this email already exists")
+            changes["email"] = {"from": u.email, "to": new_email}
+            u.email = new_email
+
     if body.stand_inventory_id is not None:
         ev = db.query(Event).filter(Event.id == ex.event_id).first()
         item = next((i for i in (ev.stand_inventory or []) if i["id"] == body.stand_inventory_id), None)
@@ -922,6 +933,56 @@ def update_exhibitor(
         payload={"exhibitor_id": exhibitor_id, "changes": changes},
     )
     return {"status": "ok"}
+
+
+@router.delete("/exhibitors/{exhibitor_id}", dependencies=[Depends(require_admin)])
+def delete_exhibitor(
+    exhibitor_id: int,
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Delete an exhibitor and all its graphics/participants/orders.
+
+    If this was the exhibitor's only stand record, the login account is
+    removed too so the email address is free to re-register with.
+    """
+    ex = db.query(Exhibitor).filter(Exhibitor.id == exhibitor_id).first()
+    if not ex:
+        raise HTTPException(404, "Exhibitor not found")
+
+    company_name = ex.company_name
+    event_id = ex.event_id
+    user_id = ex.user_id
+    email = ex.user.email if ex.user else None
+
+    db.delete(ex)  # cascades graphics, company profile, participants, equipment orders
+    db.flush()
+
+    remaining = db.query(Exhibitor).filter(Exhibitor.user_id == user_id).count()
+    user_deleted = False
+    if remaining == 0:
+        u = db.query(User).filter(User.id == user_id, User.role == UserRole.EXHIBITOR.value).first()
+        if u:
+            db.delete(u)
+            user_deleted = True
+
+    log_event(
+        db,
+        user_id=admin.id,
+        event_type="admin_delete_exhibitor",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        payload={
+            "exhibitor_id": exhibitor_id,
+            "company_name": company_name,
+            "event_id": event_id,
+            "email": email,
+            "user_deleted": user_deleted,
+        },
+    )
+    db.commit()
+    return {"status": "deleted", "exhibitor_id": exhibitor_id, "event_id": event_id}
 
 
 @router.get("/exhibitors/{exhibitor_id}/graphics", dependencies=[Depends(require_admin)])
