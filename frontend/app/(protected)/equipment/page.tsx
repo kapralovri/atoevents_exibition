@@ -4,15 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Minus, Plus, ShoppingCart, Trash2, BadgePercent, Send, CheckCircle2 } from "lucide-react";
+import { Minus, Plus, ShoppingCart, Trash2, BadgePercent, Send, CheckCircle2, PackageSearch } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 
 interface CatalogItem {
   sku: string;
   name: string;
-  price: number;
+  price: number | null;
   note?: string;
+  desc?: string;
 }
 
 interface CatalogCategory {
@@ -35,6 +36,33 @@ type CartMap = Record<string, number>; // sku -> quantity
 
 const eur = (n: number) =>
   new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+
+// ── Product thumbnail: /public/shop/<SKU>.jpg, falls back to a placeholder tile ──
+function ProductImage({ sku, name }: { sku: string; name: string }) {
+  const [broken, setBroken] = useState(false);
+
+  if (broken) {
+    return (
+      <div
+        className="aspect-square w-full flex items-center justify-center"
+        style={{ background: "hsl(209 65% 21% / 0.06)" }}
+      >
+        <PackageSearch className="h-8 w-8" style={{ color: "hsl(209 65% 21% / 0.35)" }} />
+      </div>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/shop/${sku}.jpg`}
+      alt={name}
+      className="aspect-square w-full object-cover"
+      loading="lazy"
+      onError={() => setBroken(true)}
+    />
+  );
+}
 
 export default function EquipmentPage() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -73,7 +101,8 @@ export default function EquipmentPage() {
     [cart, itemsBySku],
   );
 
-  const subtotal = cartLines.reduce((s, l) => s + l.item.price * l.qty, 0);
+  const subtotal = cartLines.reduce((s, l) => s + (l.item.price ?? 0) * l.qty, 0);
+  const hasQuoteOnlyItems = cartLines.some((l) => l.item.price == null);
   const discountPct = catalog?.discount_percent ?? 20;
   const discounted = Math.round(subtotal * (1 - discountPct / 100));
 
@@ -155,49 +184,65 @@ export default function EquipmentPage() {
         {/* ── Catalogue ───────────────────────────────────────── */}
         <div className="space-y-6 min-w-0">
           {catalog?.categories.map((cat) => (
-            <Card key={cat.category} className="card-elevated">
-              <CardContent className="pt-5 pb-2">
-                <h2 className="font-semibold text-foreground mb-3">{cat.category}</h2>
-                <ul className="divide-y divide-slate-100">
-                  {cat.items.map((item) => {
-                    const qty = cart[item.sku] || 0;
-                    return (
-                      <li key={item.sku} className="flex items-center gap-3 py-3">
+            <div key={cat.category}>
+              <h2 className="section-label mb-3">{cat.category}</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+                {cat.items.map((item) => {
+                  const qty = cart[item.sku] || 0;
+                  return (
+                    <Card
+                      key={item.sku}
+                      className="card-elevated card-hover overflow-hidden flex flex-col"
+                    >
+                      <ProductImage sku={item.sku} name={item.name} />
+                      <CardContent className="p-3.5 flex flex-col gap-2 flex-1">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-foreground leading-snug">{item.name}</p>
+                          <p className="text-sm font-semibold text-foreground leading-snug line-clamp-2">
+                            {item.name}
+                          </p>
+                          {item.desc && (
+                            <p className="text-xs text-muted-foreground leading-snug mt-1 line-clamp-2">
+                              {item.desc}
+                            </p>
+                          )}
                           {item.note && (
-                            <p className="text-xs text-muted-foreground mt-0.5">{item.note}</p>
+                            <p className="text-[11px] font-medium mt-1" style={{ color: "hsl(209 65% 38%)" }}>
+                              {item.note}
+                            </p>
                           )}
                         </div>
-                        <span className="text-sm font-semibold whitespace-nowrap tabular-nums text-foreground">
-                          {eur(item.price)}
-                        </span>
-                        {qty === 0 ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="shrink-0"
-                            onClick={() => setQty(item.sku, 1)}
-                          >
-                            <Plus className="h-3.5 w-3.5 mr-1" /> Add
-                          </Button>
-                        ) : (
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => setQty(item.sku, qty - 1)}>
-                              <Minus className="h-3.5 w-3.5" />
+
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="text-sm font-bold whitespace-nowrap tabular-nums text-foreground">
+                            {item.price != null ? eur(item.price) : "On request"}
+                          </span>
+                          {qty === 0 ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0"
+                              onClick={() => setQty(item.sku, 1)}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" /> Add
                             </Button>
-                            <span className="w-8 text-center text-sm font-semibold tabular-nums">{qty}</span>
-                            <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => setQty(item.sku, qty + 1)}>
-                              <Plus className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </CardContent>
-            </Card>
+                          ) : (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => setQty(item.sku, qty - 1)}>
+                                <Minus className="h-3.5 w-3.5" />
+                              </Button>
+                              <span className="w-6 text-center text-sm font-semibold tabular-nums">{qty}</span>
+                              <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => setQty(item.sku, qty + 1)}>
+                                <Plus className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
           ))}
         </div>
 
@@ -226,10 +271,12 @@ export default function EquipmentPage() {
                       <div className="min-w-0 flex-1">
                         <p className="leading-snug text-foreground">{l.item.name}</p>
                         <p className="text-xs text-muted-foreground tabular-nums">
-                          {l.qty} × {eur(l.item.price)}
+                          {l.qty} × {l.item.price != null ? eur(l.item.price) : "on request"}
                         </p>
                       </div>
-                      <span className="font-medium whitespace-nowrap tabular-nums">{eur(l.item.price * l.qty)}</span>
+                      <span className="font-medium whitespace-nowrap tabular-nums">
+                        {l.item.price != null ? eur(l.item.price * l.qty) : "—"}
+                      </span>
                       <button
                         aria-label={`Remove ${l.item.name}`}
                         className="text-slate-400 hover:text-red-500 transition-colors mt-0.5"
@@ -254,6 +301,11 @@ export default function EquipmentPage() {
                     <span>Estimated total</span>
                     <span className="tabular-nums">{eur(discounted)}</span>
                   </div>
+                  {hasQuoteOnlyItems && (
+                    <p className="text-xs pt-0.5" style={{ color: "hsl(45 80% 34%)" }}>
+                      Plus items priced upon request — your manager will quote those separately.
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground pt-1">
                     Final price is confirmed in the invoice issued by your manager.
                   </p>

@@ -43,6 +43,20 @@ CATALOG: List[Dict[str, Any]] = [
             {"sku": "ITEM_TRAVEL_HOLDER", "name": "Travel Holder", "price": 3500},
             {"sku": "ITEM_CARDS_HOLDER", "name": "Cards Holder", "price": 3500},
             {"sku": "ITEM_BAGGAGE_HOOK", "name": "Baggage Hook", "price": 4000},
+            {
+                "sku": "ITEM_WELCOME_PACK",
+                "name": "Welcome Pack",
+                "price": None,
+                "note": "upon request",
+                "desc": "Branded bag with water bottle, notepad and a pen, handed to every delegate at registration.",
+            },
+            {
+                "sku": "ITEM_SOUVENIRS",
+                "name": "Souvenirs",
+                "price": None,
+                "note": "upon request",
+                "desc": "Custom branded souvenirs for delegates — let us know what you have in mind.",
+            },
         ],
     },
     {
