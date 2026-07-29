@@ -41,6 +41,18 @@ class CompanyProfileUpdate(BaseModel):
         return _validate_website(v)
 
 
+class CompanyVideoBody(BaseModel):
+    url: str = Field(..., min_length=1)
+
+    @field_validator("url")
+    @classmethod
+    def _url_safe(cls, v):
+        safe = _validate_website(v)
+        if not safe:
+            raise ValueError("URL is required")
+        return safe
+
+
 class ParticipantCreate(BaseModel):
     company: str = ""
     first_name: str

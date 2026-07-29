@@ -32,6 +32,11 @@ class Exhibitor(Base):
     company_status: Mapped[str] = mapped_column(String(32), default="DRAFT")
     participants_status: Mapped[str] = mapped_column(String(32), default="NOT_SUBMITTED")
 
+    # Optional task: exhibitor may link a company video, or dismiss it as not required.
+    # NOT_STARTED | SUBMITTED | NOT_REQUIRED — never blocks overall completion.
+    company_video_status: Mapped[str] = mapped_column(String(32), default="NOT_STARTED")
+    company_video_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+
     graphics_admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     company_admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

@@ -10,6 +10,7 @@ import {
   Users,
   AlertCircle,
   ArrowRight,
+  Video,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
@@ -20,6 +21,7 @@ interface ExhibitorData {
   graphics_status: string;
   description_status: string;
   participants_status: string;
+  company_video_status?: string;
   event_name: string;
   deadline_graphics: string;
   booth_size: number;
@@ -414,6 +416,67 @@ export default function DashboardPage() {
               );
             })}
           </div>
+
+          {/* Optional task — never counted toward completion above */}
+          {data.company_video_status && (
+            <>
+              <p className="section-label mt-5 mb-1">Optional</p>
+              <div className="divide-y" style={{ borderColor: "hsl(var(--border) / 0.55)" }}>
+                <Link
+                  href="/company-video"
+                  className="group flex items-center gap-4 py-4 rounded-xl animate-fade-up"
+                  style={{ transition: "background-color 130ms cubic-bezier(0.23,1,0.32,1)" }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor = "hsl(213 20% 96% / 0.7)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor = "";
+                  }}
+                >
+                  <div
+                    className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-150 group-hover:scale-105"
+                    style={{
+                      background: data.company_video_status === "SUBMITTED"
+                        ? "hsl(154 100% 49% / 0.1)"
+                        : "hsl(209 65% 21% / 0.06)",
+                    }}
+                  >
+                    {data.company_video_status === "SUBMITTED" ? (
+                      <CheckCircle2 className="h-5 w-5" style={{ color: "hsl(154 60% 38%)" }} />
+                    ) : (
+                      <Video className="h-5 w-5" style={{ color: "hsl(209 65% 40%)" }} />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="text-sm font-semibold leading-tight"
+                      style={{
+                        color: data.company_video_status === "SUBMITTED"
+                          ? "hsl(154 60% 30%)"
+                          : "hsl(var(--foreground))",
+                      }}
+                    >
+                      Company Video
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {data.company_video_status === "SUBMITTED"
+                        ? "Submitted"
+                        : data.company_video_status === "NOT_REQUIRED"
+                        ? "Not required"
+                        : "Optional — no video yet"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <StatusBadge status={data.company_video_status} />
+                    <ArrowRight
+                      className="h-3.5 w-3.5 text-muted-foreground opacity-0 translate-x-0 group-hover:opacity-100 group-hover:translate-x-0.5"
+                      style={{ transition: "opacity 140ms cubic-bezier(0.23,1,0.32,1), transform 140ms cubic-bezier(0.23,1,0.32,1)" }}
+                    />
+                  </div>
+                </Link>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

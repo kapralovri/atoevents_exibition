@@ -36,6 +36,7 @@ import {
   X,
   KeyRound,
   Trash2,
+  Video,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
@@ -70,6 +71,8 @@ interface Exhibitor {
   company_description?: string;
   website?: string;
   logo_url?: string;
+  company_video_status?: string;
+  company_video_url?: string;
   participants?: Participant[];
 }
 
@@ -568,6 +571,33 @@ export default function AdminExhibitorDetailPage() {
                 </Card>
               ))}
             </div>
+
+            {/* Company video (optional task) — shown once the exhibitor has taken an action */}
+            {exhibitor.company_video_status === "SUBMITTED" && exhibitor.company_video_url && (
+              <Card className="card-elevated">
+                <CardContent className="py-3.5 flex items-center gap-3">
+                  <Video className="h-4 w-4 shrink-0" style={{ color: "hsl(209 65% 38%)" }} />
+                  <span className="text-sm font-medium text-muted-foreground shrink-0">Company Video</span>
+                  <a
+                    href={exhibitor.company_video_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium truncate transition-colors"
+                    style={{ color: "hsl(209 65% 38%)" }}
+                  >
+                    {exhibitor.company_video_url}
+                  </a>
+                </CardContent>
+              </Card>
+            )}
+            {exhibitor.company_video_status === "NOT_REQUIRED" && (
+              <Card className="card-elevated">
+                <CardContent className="py-3.5 flex items-center gap-3">
+                  <Video className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">Company Video — marked not required by exhibitor</span>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Edit stand button */}
             {!showEditStand && (

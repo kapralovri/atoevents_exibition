@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/status-badge";
-import { FileImage, FileText, Users, ChevronRight } from "lucide-react";
+import { FileImage, FileText, Users, Video, ChevronRight } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -13,6 +13,7 @@ interface ExhibitorData {
   graphics_status: string;
   description_status: string;
   participants_status: string;
+  company_video_status?: string;
 }
 
 interface Task {
@@ -74,13 +75,22 @@ export default function TasksPage() {
       href: "/participants",
       icon: Users,
     },
+    {
+      id: "company-video",
+      title: "Company Video (optional)",
+      description: "Link a video about your company, or mark it as not required",
+      event_name: data.event_name,
+      status: data.company_video_status || "NOT_STARTED",
+      href: "/company-video",
+      icon: Video,
+    },
   ] : [];
 
   const statusOrder: Record<string, number> = {
     NOT_STARTED: 0, NOT_UPLOADED: 0, NOT_SUBMITTED: 0,
     DRAFT: 1,
     UNDER_REVIEW: 2,
-    APPROVED: 3,
+    APPROVED: 3, SUBMITTED: 3, NOT_REQUIRED: 3,
     REJECTED: -1,
     REVISION: -1,
   };
@@ -116,7 +126,7 @@ export default function TasksPage() {
                 {/* Left stripe */}
                 <div className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full"
                   style={{
-                    background: task.status === "APPROVED"
+                    background: task.status === "APPROVED" || task.status === "SUBMITTED" || task.status === "NOT_REQUIRED"
                       ? "hsl(154 100% 49%)"
                       : task.status === "UNDER_REVIEW"
                       ? "hsl(45 96% 50%)"

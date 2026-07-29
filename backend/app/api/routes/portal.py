@@ -22,6 +22,7 @@ from app.models.user import User, is_staff
 from app.schemas.portal import (
     ChangeRequestBody,
     CompanyProfileUpdate,
+    CompanyVideoBody,
     CompleteUploadBody,
     EquipmentOrderCreate,
     GdprConsentRequest,
@@ -137,6 +138,10 @@ def me_exhibitor(user: Annotated[User, Depends(get_current_user)], db: Session =
         "graphics_status": ex.graphics_status,
         "description_status": ex.company_status,
         "participants_status": ex.participants_status,
+        # Optional task — never factors into overall_status/completeness below.
+        "company_video_status": ex.company_video_status,
+        "company_video_url": ex.company_video_url,
+        "fully_locked": ex.fully_locked,
         "overall_status": "complete" if (
             ex.fully_locked or (
                 (ex.graphics_status or "").upper() in ("APPROVED", "VALID") and
@@ -206,6 +211,9 @@ def me_exhibitors(user: Annotated[User, Depends(get_current_user)], db: Session 
             "graphics_status": ex.graphics_status,
             "description_status": ex.company_status,
             "participants_status": ex.participants_status,
+            "company_video_status": ex.company_video_status,
+            "company_video_url": ex.company_video_url,
+            "fully_locked": ex.fully_locked,
             "overall_status": "complete" if (
                 ex.fully_locked or (
                     (ex.graphics_status or "").upper() in ("APPROVED", "VALID") and
@@ -344,6 +352,41 @@ def me_submit_description(
     recipients = event_recipient_emails(db, ev)
     sub, text, html = notify_admin_description_submitted(ex.company_name, ev.name if ev else "")
     _dispatch_email(background_tasks, recipients, sub, text, html)
+    return {"status": "ok"}
+
+
+@router.post("/me/exhibitor/video/submit")
+def me_submit_company_video(
+    body: CompanyVideoBody,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Optional task: link a company video. No admin review — exhibitor-controlled."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if ex.fully_locked:
+        raise HTTPException(403, "Locked")
+    ex.company_video_url = body.url
+    ex.company_video_status = "SUBMITTED"
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/me/exhibitor/video/not-required")
+def me_dismiss_company_video(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Optional task: exhibitor declares a company video is not needed."""
+    ex = db.query(Exhibitor).filter(Exhibitor.user_id == user.id).first()
+    if not ex:
+        raise HTTPException(404, "No exhibitor profile found")
+    if ex.fully_locked:
+        raise HTTPException(403, "Locked")
+    ex.company_video_url = None
+    ex.company_video_status = "NOT_REQUIRED"
+    db.commit()
     return {"status": "ok"}
 
 
