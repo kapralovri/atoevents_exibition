@@ -113,7 +113,7 @@ export default function AdminOrdersPage() {
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
-              className="rounded-full px-3 py-1.5 text-xs font-semibold border transition-colors"
+              className="rounded-full px-3 py-1.5 text-xs font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               style={
                 active
                   ? { background: "hsl(209 65% 21%)", color: "#fff", borderColor: "hsl(209 65% 21%)" }
@@ -164,7 +164,7 @@ export default function AdminOrdersPage() {
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                     <button
                       onClick={() => toggle(o.id)}
-                      className="flex items-center gap-2 text-left min-w-0 flex-1"
+                      className="flex items-center gap-2 text-left min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
                       {isOpen ? (
                         <ChevronUp className="h-4 w-4 shrink-0 text-slate-400" />

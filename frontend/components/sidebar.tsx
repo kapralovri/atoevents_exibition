@@ -117,7 +117,7 @@ export function Sidebar({
         onClick={toggle}
         aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        className="absolute -right-3 top-20 z-10 h-6 w-6 rounded-full flex items-center justify-center bg-white border border-slate-200 text-slate-500 hover:text-slate-800 hover:border-slate-300 shadow-sm transition-all active:scale-90"
+        className="absolute -right-3 top-20 z-10 h-6 w-6 rounded-full flex items-center justify-center bg-white border border-slate-200 text-slate-500 hover:text-slate-800 hover:border-slate-300 shadow-sm transition-all active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         {isCollapsed
           ? <ChevronRight className="h-3 w-3" />
@@ -173,7 +173,8 @@ export function Sidebar({
                   className={cn(
                     "group relative flex items-center gap-3 rounded-lg text-sm",
                     isCollapsed ? "px-0 py-2.5 justify-center" : "px-3 py-2.5",
-                    "active:scale-[0.98]"
+                    "active:scale-[0.98]",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   )}
                   style={{
                     transition: "background-color 120ms, color 120ms, transform 100ms",
@@ -269,7 +270,8 @@ export function Sidebar({
           title={isCollapsed ? "Sign Out" : undefined}
           className={cn(
             "flex w-full items-center gap-2.5 rounded-lg py-2 text-sm font-medium active:scale-[0.97]",
-            isCollapsed ? "justify-center px-0" : "px-3"
+            isCollapsed ? "justify-center px-0" : "px-3",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           )}
           style={{
             color: "hsl(210 10% 42%)",
