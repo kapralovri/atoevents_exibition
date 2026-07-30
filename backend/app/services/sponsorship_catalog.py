@@ -116,3 +116,14 @@ _BY_SKU: Dict[str, Dict[str, Any]] = {
 
 def get_item(sku: str) -> Optional[Dict[str, Any]]:
     return _BY_SKU.get(sku)
+
+
+def apply_discount(unit_price: Optional[float]) -> Optional[float]:
+    """Discounted per-unit price shown to the manager/exhibitor as an estimate.
+
+    The invoice discount is still applied manually by the manager — this is
+    informational only, computed from the list price stored on the order.
+    """
+    if unit_price is None:
+        return None
+    return round(unit_price * (1 - SHOP_DISCOUNT_PERCENT / 100), 2)

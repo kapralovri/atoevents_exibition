@@ -26,6 +26,13 @@ _SECTION_NAMES: Dict[str, str] = {
     "participants": "Participants",
 }
 
+def _eur(amount: Optional[float]) -> str:
+    """Matches the frontend's Intl.NumberFormat("en-IE", ...) rendering."""
+    if amount is None:
+        return "On request"
+    return f"€{amount:,.0f}"
+
+
 _STATUS_LABELS: Dict[str, str] = {
     "APPROVED":       "Approved",
     "VALID":          "Approved",
@@ -480,33 +487,78 @@ def notify_admin_equipment(
     exhibitor_name: str,
     event_name: str,
     lines: List[Dict[str, Any]],
+    discount_percent: int,
+    discounted_total: float,
+    has_quote_only: bool = False,
 ) -> Tuple[str, str, str]:
-    subject = f"Equipment order: {exhibitor_name}"
+    """`lines` items: name, quantity, unit_price (list), discounted_unit_price, line_total.
+
+    Prices shown here are informational estimates (list price minus the
+    standing shop discount) — the manager still issues the actual invoice.
+    """
+    def _line_text(x: Dict[str, Any]) -> str:
+        if x.get("discounted_unit_price") is None:
+            return f"- {x.get('name')} x{x.get('quantity')} — on request"
+        return (
+            f"- {x.get('name')} x{x.get('quantity')} — "
+            f"{_eur(x.get('discounted_unit_price'))}/unit (after {discount_percent}% discount), "
+            f"line total {_eur(x.get('line_total'))}"
+        )
+
     text = (
         f"Company {exhibitor_name} — event {event_name}\n\n"
-        + "\n".join(f"- {x.get('name')} x{x.get('quantity')}" for x in lines)
+        + "\n".join(_line_text(x) for x in lines)
+        + f"\n\nEstimated total (after {discount_percent}% discount): {_eur(discounted_total)}"
+        + ("\nPlus item(s) priced upon request — quote separately." if has_quote_only else "")
     )
-    rows_html = "".join(
-        f'<tr><td style="padding:8px 0;border-bottom:1px solid #f0f0f0;'
-        f'font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#3a3a3a;">'
-        f'{x.get("name", "")}</td>'
-        f'<td style="padding:8px 0;border-bottom:1px solid #f0f0f0;text-align:right;'
-        f'font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:{_BLACK};">'
-        f'x{x.get("quantity", 0)}</td></tr>'
-        for x in lines
+
+    def _row_html(x: Dict[str, Any]) -> str:
+        price_cell = (
+            "On request"
+            if x.get("discounted_unit_price") is None
+            else f'{_eur(x.get("discounted_unit_price"))} <span style="color:#9a9a9a;font-weight:normal;">/unit</span>'
+        )
+        total_cell = _eur(x.get("line_total"))
+        return (
+            '<tr>'
+            f'<td style="padding:8px 0;border-bottom:1px solid #f0f0f0;'
+            f'font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#3a3a3a;">'
+            f'{x.get("name", "")} <span style="color:#9a9a9a;">x{x.get("quantity", 0)}</span></td>'
+            f'<td style="padding:8px 0;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap;'
+            f'font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;color:{_BLACK};">'
+            f'{price_cell}</td>'
+            f'<td style="padding:8px 0 8px 16px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap;'
+            f'font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:{_BLACK};">'
+            f'{total_cell}</td>'
+            '</tr>'
+        )
+
+    rows_html = "".join(_row_html(x) for x in lines)
+    quote_note = (
+        '<p style="margin:10px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#9a7a1f;">'
+        'Plus item(s) priced upon request — quote separately.</p>'
+        if has_quote_only else ""
     )
     body_content = (
         f"<p style='margin:0 0 16px 0;'><strong>{exhibitor_name}</strong> submitted an "
         f"equipment order for <strong>{event_name}</strong>.</p>"
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
         f'{rows_html}'
+        f'<tr><td style="padding:14px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;'
+        f'font-weight:bold;color:{_BLACK};">Estimated total <span style="font-weight:normal;color:#9a9a9a;">'
+        f'(after {discount_percent}% discount)</span></td>'
+        f'<td></td>'
+        f'<td style="padding:14px 0 0 16px;text-align:right;white-space:nowrap;font-family:Arial,Helvetica,sans-serif;'
+        f'font-size:18px;font-weight:bold;color:{_BLACK};">{_eur(discounted_total)}</td></tr>'
         f'</table>'
+        f'{quote_note}'
     )
     html = _html_layout(
         "Admin Notification",
         f"Equipment order<br><span style='color:{_GREEN};'>received.</span>",
         _body_text(body_content),
     )
+    subject = f"Equipment order: {exhibitor_name}"
     return subject, text, html
 
 

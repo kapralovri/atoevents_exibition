@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Minus, Plus, ShoppingCart, Trash2, BadgePercent, Send, CheckCircle2, PackageSearch } from "lucide-react";
+import { Minus, Plus, ShoppingCart, Trash2, BadgePercent, Send, CheckCircle2, PackageSearch, ReceiptText, ChevronDown, ChevronUp } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -32,10 +32,50 @@ interface ExhibitorData {
   event_name: string;
 }
 
+interface MyOrderItem {
+  sku: string;
+  name: string;
+  quantity: number;
+  unit_price: number | null;
+  discounted_unit_price: number | null;
+  line_total: number | null;
+}
+
+interface MyOrder {
+  id: number;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  items: MyOrderItem[];
+  discounted_total: number;
+  has_quote_only: boolean;
+}
+
 type CartMap = Record<string, number>; // sku -> quantity
 
 const eur = (n: number) =>
   new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+
+const ORDER_STATUS_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  SUBMITTED: {
+    label: "New",
+    color: "hsl(209 65% 38%)",
+    bg: "hsl(209 65% 21% / 0.08)",
+    border: "hsl(209 65% 21% / 0.2)",
+  },
+  INVOICE_SENT: {
+    label: "Invoice sent — awaiting payment",
+    color: "hsl(45 80% 30%)",
+    bg: "hsl(45 100% 94%)",
+    border: "hsl(45 80% 82%)",
+  },
+  PAID: {
+    label: "Paid",
+    color: "hsl(154 60% 35%)",
+    bg: "hsl(154 80% 94%)",
+    border: "hsl(154 60% 82%)",
+  },
+};
 
 // ── Product thumbnail: /public/shop/<SKU>.jpg, falls back to a placeholder tile ──
 function ProductImage({ sku, name }: { sku: string; name: string }) {
@@ -72,6 +112,13 @@ export default function EquipmentPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [orderId, setOrderId] = useState<number | null>(null);
+  const [myOrders, setMyOrders] = useState<MyOrder[]>([]);
+  const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
+
+  const loadOrders = (exhibitorId: number) =>
+    apiFetch<MyOrder[]>(`/portal/exhibitors/${exhibitorId}/equipment-orders`)
+      .then(setMyOrders)
+      .catch(() => {});
 
   useEffect(() => {
     Promise.all([
@@ -81,6 +128,7 @@ export default function EquipmentPage() {
       .then(([cat, ex]) => {
         setCatalog(cat);
         setExhibitor(ex);
+        loadOrders(ex.id);
       })
       .catch(() => toast.error("Failed to load the catalogue"))
       .finally(() => setLoading(false));
@@ -125,6 +173,7 @@ export default function EquipmentPage() {
       setCart({});
       setNotes("");
       toast.success("Order sent to your manager");
+      loadOrders(exhibitor.id);
     } catch {
       toast.error("Failed to send the order — please try again");
     } finally {
@@ -176,6 +225,81 @@ export default function EquipmentPage() {
                 Your manager will prepare an invoice with the {discountPct}% discount and contact you shortly.
               </p>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {myOrders.length > 0 && (
+        <Card className="card-elevated">
+          <CardContent className="pt-5">
+            <div className="flex items-center gap-2 mb-3">
+              <ReceiptText className="h-4 w-4" style={{ color: "hsl(209 65% 38%)" }} />
+              <h2 className="font-semibold text-foreground">Your Orders</h2>
+              <span className="ml-auto text-xs font-semibold rounded-full px-2 py-0.5 bg-slate-100 text-slate-600">
+                {myOrders.length}
+              </span>
+            </div>
+            <ul className="divide-y divide-slate-100">
+              {myOrders.map((o) => {
+                const meta = ORDER_STATUS_META[o.status] ?? ORDER_STATUS_META.SUBMITTED;
+                const isOpen = expandedOrder === o.id;
+                return (
+                  <li key={o.id} className="py-3">
+                    <button
+                      onClick={() => setExpandedOrder(isOpen ? null : o.id)}
+                      className="w-full flex items-center gap-3 text-left"
+                    >
+                      {isOpen ? (
+                        <ChevronUp className="h-4 w-4 shrink-0 text-slate-400" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground truncate">
+                          #{o.id} · {new Date(o.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {o.items.map((i) => `${i.name} ×${i.quantity}`).join(", ")}
+                        </p>
+                      </div>
+                      <span className="text-sm font-bold whitespace-nowrap tabular-nums text-foreground shrink-0">
+                        {o.has_quote_only && o.discounted_total === 0 ? "On request" : eur(o.discounted_total)}
+                      </span>
+                      <span
+                        className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold border whitespace-nowrap"
+                        style={{ color: meta.color, background: meta.bg, borderColor: meta.border }}
+                      >
+                        {meta.label}
+                      </span>
+                    </button>
+
+                    {isOpen && (
+                      <div className="mt-3 ml-7 space-y-1.5">
+                        {o.items.map((i) => (
+                          <div key={i.sku} className="flex items-center justify-between text-sm gap-2">
+                            <span className="text-muted-foreground truncate">
+                              {i.name} <span className="tabular-nums">×{i.quantity}</span>
+                            </span>
+                            <span className="tabular-nums whitespace-nowrap">
+                              {i.line_total != null ? eur(i.line_total) : "On request"}
+                            </span>
+                          </div>
+                        ))}
+                        {o.notes && (
+                          <p className="text-xs text-muted-foreground pt-1">
+                            <span className="font-semibold text-foreground">Notes: </span>
+                            {o.notes}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground pt-1">
+                          Estimated total shown after the standing discount — final price is confirmed on your invoice.
+                        </p>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           </CardContent>
         </Card>
       )}

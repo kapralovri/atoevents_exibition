@@ -50,7 +50,7 @@ from app.services.graphics_validation import (
     validate_graphic_from_path,
 )
 from app.services.recipients import event_recipient_emails
-from app.services.sponsorship_catalog import CATALOG, SHOP_DISCOUNT_PERCENT, get_item
+from app.services.sponsorship_catalog import CATALOG, SHOP_DISCOUNT_PERCENT, apply_discount, get_item
 from app.services.stand_matrix import slots_for_exhibitor, slot_dict_for_api, get_overlay_zones
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -1109,14 +1109,80 @@ def submit_equipment(
     db.commit()
     db.refresh(order)
 
-    lines = [
-        {"name": get_item(it.sku)["name"], "quantity": it.quantity}
-        for it in body.items
-    ]
+    lines = []
+    discounted_total = 0.0
+    has_quote_only = False
+    for it in body.items:
+        cat_item = get_item(it.sku)
+        unit_price = cat_item["price"]
+        discounted_unit_price = apply_discount(unit_price)
+        if discounted_unit_price is None:
+            has_quote_only = True
+            line_total = None
+        else:
+            line_total = round(discounted_unit_price * it.quantity, 2)
+            discounted_total += line_total
+        lines.append({
+            "name": cat_item["name"],
+            "quantity": it.quantity,
+            "unit_price": unit_price,
+            "discounted_unit_price": discounted_unit_price,
+            "line_total": line_total,
+        })
     recipients = event_recipient_emails(db, ev)
-    sub, text, html = notify_admin_equipment(ex.company_name, ev.name, lines)
+    sub, text, html = notify_admin_equipment(
+        ex.company_name, ev.name, lines, SHOP_DISCOUNT_PERCENT, discounted_total, has_quote_only,
+    )
     _dispatch_email(background_tasks, recipients, sub, text, html)
     return {"order_id": order.id}
+
+
+@router.get("/exhibitors/{exhibitor_id}/equipment-orders")
+def list_my_equipment_orders(
+    exhibitor_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """Order history for the current exhibitor — status stays in sync with the
+    admin Orders view since both read the same EquipmentOrder.status column."""
+    ex = _get_exhibitor(db, exhibitor_id, user)
+    orders = (
+        db.query(EquipmentOrder)
+        .filter(EquipmentOrder.exhibitor_id == exhibitor_id)
+        .order_by(EquipmentOrder.created_at.desc())
+        .all()
+    )
+    result = []
+    for order in orders:
+        items = []
+        discounted_total = 0.0
+        has_quote_only = False
+        for li in order.line_items:
+            discounted_unit_price = apply_discount(li.unit_price)
+            line_total = None
+            if discounted_unit_price is None:
+                has_quote_only = True
+            else:
+                line_total = round(discounted_unit_price * li.quantity, 2)
+                discounted_total += line_total
+            items.append({
+                "sku": li.sku,
+                "name": li.name,
+                "quantity": li.quantity,
+                "unit_price": li.unit_price,
+                "discounted_unit_price": discounted_unit_price,
+                "line_total": line_total,
+            })
+        result.append({
+            "id": order.id,
+            "status": order.status,
+            "notes": order.notes,
+            "created_at": order.created_at.isoformat(),
+            "items": items,
+            "discounted_total": discounted_total,
+            "has_quote_only": has_quote_only,
+        })
+    return result
 
 
 @router.post("/exhibitors/{exhibitor_id}/change-request")
