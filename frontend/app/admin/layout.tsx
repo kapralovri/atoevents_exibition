@@ -59,7 +59,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  const sidebarW = collapsed ? "ml-16" : "ml-64";
+  // Sidebar is floating (left-4, w-[72] or w-[240]) — leave room + 16px gap
+  const sidebarW = collapsed ? "ml-[104px]" : "ml-[272px]";
 
   return (
     <div className="flex h-screen" style={{ background: "hsl(210 25% 98%)" }}>
