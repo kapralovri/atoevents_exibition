@@ -393,6 +393,12 @@ def update_event(event_id: int, body: EventUpdate, db: Session = Depends(get_db)
     ev = db.query(Event).filter(Event.id == event_id).first()
     if not ev:
         raise HTTPException(404, "Event not found")
+    old_deadlines = {
+        "deadline_graphics_initial": ev.deadline_graphics_initial,
+        "deadline_final_graphics": ev.deadline_final_graphics,
+        "deadline_company_profile": ev.deadline_company_profile,
+        "deadline_participants": ev.deadline_participants,
+    }
     data = body.model_dump(exclude_unset=True)
     # Serialize StandInventoryItem objects → plain dicts for JSONB storage
     if "stand_inventory" in data and data["stand_inventory"] is not None:
@@ -408,6 +414,30 @@ def update_event(event_id: int, body: EventUpdate, db: Session = Depends(get_db)
         data["responsible_id"] = rid if (rid is not None and _valid_manager_ids(db, [rid])) else None
     for k, v in data.items():
         setattr(ev, k, v)
+
+    # Section locks are set exclusively by the deadline-passed check in
+    # deadlines.py and never cleared automatically — pushing a deadline back
+    # out into the future must lift any lock that deadline caused, or the
+    # exhibitor stays stuck forever even though the deadline is no longer past.
+    today = date.today()
+    deadline_to_lock_attr = {
+        "deadline_graphics_initial": "section_graphics_locked",
+        "deadline_final_graphics": "section_graphics_locked",
+        "deadline_company_profile": "section_company_locked",
+        "deadline_participants": "section_participants_locked",
+    }
+    lock_attrs_to_lift = {
+        lock_attr
+        for field, lock_attr in deadline_to_lock_attr.items()
+        if field in data and data[field] is not None
+        and data[field] >= today
+        and (old_deadlines[field] is None or data[field] > old_deadlines[field])
+    }
+    if lock_attrs_to_lift:
+        for ex in db.query(Exhibitor).filter(Exhibitor.event_id == event_id, Exhibitor.fully_locked.is_(False)).all():
+            for lock_attr in lock_attrs_to_lift:
+                setattr(ex, lock_attr, False)
+
     db.commit()
     return {"status": "ok"}
 
