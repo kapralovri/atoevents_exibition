@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   Card,
@@ -117,6 +117,35 @@ export default function AdminExhibitorDetailPage() {
   const [editStand, setEditStand] = useState({ stand_inventory_id: "", stand_package: "BESPOKE", stand_configuration: "LINEAR", area_m2: 9, is_custom: false });
   const [eventInventory, setEventInventory] = useState<{ id: string; package: string; area_m2: number; configuration: string; total: number; booked: number; available: number; is_full: boolean }[]>([]);
   const [isSavingStand, setIsSavingStand] = useState(false);
+
+  // Participants table — resizable columns (drag the handle on the right edge of a header cell)
+  const DEFAULT_PARTICIPANT_COL_WIDTHS = { name: 180, title: 180, email: 220, badge: 90 };
+  const [participantColWidths, setParticipantColWidths] = useState(DEFAULT_PARTICIPANT_COL_WIDTHS);
+  const resizingCol = useRef<{
+    key: keyof typeof DEFAULT_PARTICIPANT_COL_WIDTHS;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const startColumnResize = (key: keyof typeof DEFAULT_PARTICIPANT_COL_WIDTHS) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    resizingCol.current = { key, startX: e.clientX, startWidth: participantColWidths[key] };
+    const onMove = (ev: MouseEvent) => {
+      const active = resizingCol.current;
+      if (!active) return;
+      const next = Math.max(70, active.startWidth + (ev.clientX - active.startX));
+      setParticipantColWidths((w) => ({ ...w, [active.key]: next }));
+    };
+    const onUp = () => {
+      resizingCol.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const participantGridTemplate = `${participantColWidths.name}px ${participantColWidths.title}px ${participantColWidths.email}px ${participantColWidths.badge}px`;
 
   // Final stand PDF (admin uploads)
   const [finalPdf, setFinalPdf] = useState<{ url: string | null; filename: string | null; uploaded_at: string | null }>({ url: null, filename: null, uploaded_at: null });
@@ -1233,39 +1262,53 @@ export default function AdminExhibitorDetailPage() {
               <CardContent className="space-y-4">
                 {/* Participants list */}
                 {exhibitor.participants && exhibitor.participants.length > 0 ? (
-                  <div className="divide-y rounded-xl overflow-hidden border" style={{ borderColor: "hsl(var(--border))" }}>
-                    {/* header */}
-                    <div
-                      className="grid grid-cols-[2fr_1fr_2fr_1fr] gap-3 px-4 py-2 text-xs font-semibold uppercase tracking-wide"
-                      style={{ color: "hsl(213 15% 55%)", background: "hsl(213 20% 97%)" }}
-                    >
-                      <span>Name</span>
-                      <span>Title</span>
-                      <span>Email</span>
-                      <span>Badge</span>
-                    </div>
-                    {exhibitor.participants.map((p) => (
+                  <div className="overflow-x-auto rounded-xl border" style={{ borderColor: "hsl(var(--border))" }}>
+                    <div className="divide-y min-w-fit">
+                      {/* header — drag the handle on the right edge of a column to widen it */}
                       <div
-                        key={p.id}
-                        className="grid grid-cols-[2fr_1fr_2fr_1fr] gap-3 px-4 py-3 text-sm items-center"
+                        className="grid gap-3 px-4 py-2 text-xs font-semibold uppercase tracking-wide select-none"
+                        style={{ color: "hsl(213 15% 55%)", background: "hsl(213 20% 97%)", gridTemplateColumns: participantGridTemplate }}
                       >
-                        <span className="font-medium">{p.full_name}</span>
-                        <span className="text-muted-foreground truncate">{p.job_title}</span>
-                        <span className="text-muted-foreground truncate">{p.email}</span>
-                        <span>
-                          {p.badge_type && (
-                            <span
-                              className="text-[10px] rounded px-1.5 py-0.5 font-semibold"
-                              style={p.badge_type === "COMPLIMENTARY"
-                                ? { background: "hsl(154 100% 49% / 0.12)", color: "hsl(154 60% 35%)" }
-                                : { background: "hsl(45 100% 90%)", color: "hsl(45 80% 30%)" }}
-                            >
-                              {p.badge_type === "COMPLIMENTARY" ? "Comp." : "Add."}
-                            </span>
-                          )}
-                        </span>
+                        {(["name", "title", "email", "badge"] as const).map((key, i, arr) => (
+                          <span key={key} className="relative pr-2 truncate">
+                            {key === "name" ? "Name" : key === "title" ? "Title" : key === "email" ? "Email" : "Badge"}
+                            {i < arr.length - 1 && (
+                              <span
+                                onMouseDown={startColumnResize(key)}
+                                title="Drag to resize column"
+                                className="absolute top-1/2 -translate-y-1/2 -right-1.5 h-4 w-2 cursor-col-resize rounded"
+                                style={{ background: "hsl(213 15% 80%)" }}
+                                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "hsl(209 65% 45%)"; }}
+                                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "hsl(213 15% 80%)"; }}
+                              />
+                            )}
+                          </span>
+                        ))}
                       </div>
-                    ))}
+                      {exhibitor.participants.map((p) => (
+                        <div
+                          key={p.id}
+                          className="grid gap-3 px-4 py-3 text-sm items-center"
+                          style={{ gridTemplateColumns: participantGridTemplate }}
+                        >
+                          <span className="font-medium truncate" title={p.full_name}>{p.full_name}</span>
+                          <span className="text-muted-foreground truncate" title={p.job_title}>{p.job_title}</span>
+                          <span className="text-muted-foreground truncate" title={p.email}>{p.email}</span>
+                          <span>
+                            {p.badge_type && (
+                              <span
+                                className="text-[10px] rounded px-1.5 py-0.5 font-semibold"
+                                style={p.badge_type === "COMPLIMENTARY"
+                                  ? { background: "hsl(154 100% 49% / 0.12)", color: "hsl(154 60% 35%)" }
+                                  : { background: "hsl(45 100% 90%)", color: "hsl(45 80% 30%)" }}
+                              >
+                                {p.badge_type === "COMPLIMENTARY" ? "Comp." : "Add."}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">
