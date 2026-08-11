@@ -38,7 +38,8 @@ Thumbs.db
 
 # Tool configs (local dev)
 .agents/
-.claude/
+.claude/*
+!.claude/skills/
 .windsurf/
 
 # Office / PDF documents (project docs, not source)
