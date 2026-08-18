@@ -21,7 +21,7 @@ _ICON_LI    = "https://docs.atocomm.eu/comm/logos/in.png"
 _ICON_FB    = "https://docs.atocomm.eu/comm/logos/fb.png"
 
 _SECTION_NAMES: Dict[str, str] = {
-    "graphics":     "Stand Graphics",
+    "graphics":     "Booth Graphics",
     "company":      "Company Description",
     "participants": "Participants",
 }
