@@ -8,12 +8,15 @@ from app.config import settings
 
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password[:72].encode(), bcrypt.gensalt()).decode()
+    # Strip accidental leading/trailing whitespace (e.g. from copy-pasting a
+    # shared password) — must match verify_password's stripping exactly, or
+    # a password set one way can never be verified the other way.
+    return bcrypt.hashpw(password.strip()[:72].encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(plain[:72].encode(), hashed.encode())
+        return bcrypt.checkpw(plain.strip()[:72].encode(), hashed.encode())
     except Exception:
         return False
 

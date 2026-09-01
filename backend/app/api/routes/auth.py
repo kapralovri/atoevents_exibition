@@ -2,6 +2,7 @@ import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -33,7 +34,7 @@ def _too_many_attempts(retry: float) -> HTTPException:
 
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
-    email = str(body.email)
+    email = str(body.email).strip()
     if settings.rate_limit_enabled:
         retry = _login_ip_limiter.check(client_ip(request))
         if retry > 0:
@@ -41,7 +42,10 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)) -
         locked = login_guard.seconds_locked(email)
         if locked > 0:
             raise _too_many_attempts(locked)
-    user = db.query(User).filter(User.email == email).first()
+    # Case-insensitive lookup — email addresses are effectively case-insensitive
+    # everywhere in practice, and typing/pasting a different case than what's
+    # stored should never be the reason a login fails.
+    user = db.query(User).filter(func.lower(User.email) == email.lower()).first()
     if not user or not verify_password(body.password, user.hashed_password):
         if settings.rate_limit_enabled:
             login_guard.register_failure(email)
