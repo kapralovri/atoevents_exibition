@@ -128,27 +128,27 @@ def _fascia_slots(cfg: str, area_m2: float, height_mm: float, is_bespoke: bool =
     fascia_w = (facade_w - 500.0) if is_bespoke else facade_w
 
     if cfg_u == "LINEAR":
-        return [GraphicSlot("fascia_board", f"Fascia Board ({fascia_w:.0f}×{height_mm:.0f} mm)", fascia_w, height_mm)]
+        return [GraphicSlot("fascia_board", "Fascia Board", fascia_w, height_mm)]
 
     if cfg_u == "ANGULAR":
         # Facade + one side (depth = 3000 mm; same bespoke reduction)
         side_w = (DEPTH_MM - 500.0) if is_bespoke else DEPTH_MM
         return [
-            GraphicSlot("fascia_1", f"Fascia Board {fascia_w:.0f}×{height_mm:.0f} mm", fascia_w, height_mm),
-            GraphicSlot("fascia_2", f"Fascia Board {side_w:.0f}×{height_mm:.0f} mm", side_w, height_mm),
+            GraphicSlot("fascia_1", "Fascia Board 1", fascia_w, height_mm),
+            GraphicSlot("fascia_2", "Fascia Board 2", side_w, height_mm),
         ]
 
     if cfg_u == "PENINSULA":
         # Facade + two sides
         side_w = (DEPTH_MM - 500.0) if is_bespoke else DEPTH_MM
         return [
-            GraphicSlot("fascia_1", f"Fascia Board {fascia_w:.0f}×{height_mm:.0f} mm", fascia_w, height_mm),
-            GraphicSlot("fascia_2", f"Fascia Board {side_w:.0f}×{height_mm:.0f} mm", side_w, height_mm),
-            GraphicSlot("fascia_3", f"Fascia Board {side_w:.0f}×{height_mm:.0f} mm", side_w, height_mm),
+            GraphicSlot("fascia_1", "Fascia Board 1", fascia_w, height_mm),
+            GraphicSlot("fascia_2", "Fascia Board 2", side_w, height_mm),
+            GraphicSlot("fascia_3", "Fascia Board 3", side_w, height_mm),
         ]
 
     # Fallback
-    return [GraphicSlot("fascia_board", f"Fascia Board ({fascia_w:.0f}×{height_mm:.0f} mm)", fascia_w, height_mm)]
+    return [GraphicSlot("fascia_board", "Fascia Board", fascia_w, height_mm)]
 
 
 def _banner_slots(cfg: str, area_m2: float) -> list[GraphicSlot]:
@@ -178,7 +178,7 @@ def _banner_slots(cfg: str, area_m2: float) -> list[GraphicSlot]:
     if cfg_u == "LINEAR":
         slots.append(GraphicSlot(
             "banner_eyelet_1",
-            f"Banner on eyelets — back wall ({BANNER_H:.0f}×{facade_banner_w:.0f} mm)",
+            "Banner on eyelets — back wall",
             BANNER_H, facade_banner_w,
         ))
 
@@ -187,12 +187,12 @@ def _banner_slots(cfg: str, area_m2: float) -> list[GraphicSlot]:
         side_banner_w = 2900.0  # 3000 − 100
         slots.append(GraphicSlot(
             "banner_eyelet_1",
-            f"Banner — back wall ({BANNER_H:.0f}×{facade_banner_w:.0f} mm)",
+            "Banner — back wall",
             BANNER_H, facade_banner_w,
         ))
         slots.append(GraphicSlot(
             "banner_eyelet_2",
-            f"Banner — side wall ({BANNER_H:.0f}×{side_banner_w:.0f} mm)",
+            "Banner — side wall",
             BANNER_H, side_banner_w,
         ))
 
@@ -200,14 +200,14 @@ def _banner_slots(cfg: str, area_m2: float) -> list[GraphicSlot]:
         # Only back wall is enclosed; two open sides have no banner
         slots.append(GraphicSlot(
             "banner_eyelet_1",
-            f"Banner on eyelets — back wall ({BANNER_H:.0f}×{facade_banner_w:.0f} mm)",
+            "Banner on eyelets — back wall",
             BANNER_H, facade_banner_w,
         ))
 
     else:
         slots.append(GraphicSlot(
             "banner_eyelet_1",
-            f"Banner on eyelets ({BANNER_H:.0f}×{facade_banner_w:.0f} mm)",
+            "Banner on eyelets",
             BANNER_H, facade_banner_w,
         ))
 
@@ -222,7 +222,7 @@ def slots_for_exhibitor(
     pkg = stand_package.upper()
     cfg = stand_configuration.upper()
     slots: list[GraphicSlot] = [
-        GraphicSlot("information_desk", "Information Desk (1140×540 mm)", 1140, 540),
+        GraphicSlot("information_desk", "Information Desk", 1140, 540),
     ]
 
     fascia_h = 300.0
@@ -236,7 +236,7 @@ def slots_for_exhibitor(
 
     if pkg == "BESPOKE":
         for i in range(6):
-            slots.append(GraphicSlot(f"glass_panel_{i+1}", f"Glass panel {i+1} (1020×1020 mm)", 1020, 1020))
+            slots.append(GraphicSlot(f"glass_panel_{i+1}", f"Glass panel {i+1}", 1020, 1020))
 
     return slots
 
