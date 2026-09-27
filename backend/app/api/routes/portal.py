@@ -486,10 +486,13 @@ def me_graphics_presign(
     ct = _GraphicsPresignBody._normalize(body.content_type)
     if ct not in _ALLOWED_GRAPHICS_MIME:
         raise HTTPException(400, f"Unsupported content type: {ct}")
-    # Use a unique key per upload; extension depends on content type
+    # Key must be unique per upload attempt — _finalize_graphic_upload deletes
+    # the *previous* upload's s3_key when a slot is re-uploaded, and a fixed
+    # deterministic key here would make that "old" key identical to the file
+    # that was just PUT, deleting it right after finalize() validated it.
     _ext_map = {"image/jpeg": ".jpg", "application/pdf": ".pdf"}
     _ext_suffix = _ext_map.get(ct, ".tif")
-    s3_key = f"graphics/{ex.id}/{slot_key}/{slot_key}{_ext_suffix}"
+    s3_key = storage.new_upload_key(f"graphics/{ex.id}/{slot_key}", f"{slot_key}{_ext_suffix}")
     result = storage.presign_put(s3_key, content_type=ct)
     return {"upload_url": result["url"], "s3_key": s3_key, "content_type": ct}
 
