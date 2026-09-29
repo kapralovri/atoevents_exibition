@@ -291,6 +291,115 @@ function ApproveModal({ exhibitorId, onClose, onApproved }: { exhibitorId: numbe
   );
 }
 
+// ─── View Final PDF Modal (read-only — for already-approved exhibitors) ───────
+function ViewFinalPdfModal({ onClose }: { onClose: () => void }) {
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfFilename, setPdfFilename] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ url: string | null; filename: string | null }>("/portal/me/exhibitor/final-pdf")
+      .then((res) => {
+        if (!res.url) setError("The final stand visualization is not available yet.");
+        else {
+          setPdfUrl(res.url);
+          setPdfFilename(res.filename ?? "stand.pdf");
+        }
+      })
+      .catch(() => setError("Failed to load the stand visualization PDF."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(8,14,26,0.88)", backdropFilter: "blur(6px)" }}
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full rounded-2xl overflow-hidden animate-fade-up flex flex-col"
+        style={{
+          background: "hsl(209 65% 12%)",
+          border: "1px solid hsl(209 65% 28% / 0.4)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.5)",
+          maxWidth: 1100,
+          maxHeight: "94vh",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: "linear-gradient(90deg, hsl(154 100% 49%), transparent)" }} />
+
+        <div className="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
+          <div>
+            <h3 className="text-base font-semibold text-white">Final Stand Visualization</h3>
+            <p className="text-sm mt-1" style={{ color: "hsl(210 25% 60%)" }}>
+              Your approved and signed stand layout.
+            </p>
+          </div>
+          <button onClick={onClose} className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0" style={{ color: "hsl(210 30% 55%)" }}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="px-6 pb-6 overflow-auto flex-1 min-h-0">
+          <div
+            className="rounded-xl overflow-hidden mb-5"
+            style={{
+              background: "hsl(210 18% 96%)",
+              border: "1px solid hsl(209 65% 28% / 0.3)",
+              height: "62vh",
+              minHeight: 420,
+            }}
+          >
+            {loading ? (
+              <div className="h-full flex flex-col items-center justify-center gap-3">
+                <span
+                  className="h-8 w-8 rounded-full border-2 border-t-transparent animate-spin"
+                  style={{ borderColor: "hsl(154 100% 49% / 0.3)", borderTopColor: "hsl(154 100% 49%)" }}
+                />
+                <p className="text-xs" style={{ color: "hsl(210 30% 40%)" }}>Loading PDF…</p>
+              </div>
+            ) : error ? (
+              <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
+                <AlertCircle className="h-10 w-10 opacity-50" style={{ color: "hsl(45 80% 40%)" }} />
+                <p className="text-sm font-semibold" style={{ color: "hsl(209 65% 22%)" }}>Not available</p>
+                <p className="text-xs max-w-sm" style={{ color: "hsl(210 14% 40%)" }}>{error}</p>
+              </div>
+            ) : pdfUrl ? (
+              <iframe
+                src={`${pdfUrl}#view=FitH&toolbar=1`}
+                title="Final stand visualization"
+                className="w-full h-full"
+                style={{ border: 0, background: "white" }}
+              />
+            ) : null}
+          </div>
+
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 h-10 rounded-xl text-sm font-medium" style={{ background: "hsl(209 65% 21% / 0.4)", color: "hsl(210 30% 60%)", border: "1px solid hsl(209 65% 28% / 0.3)" }}>
+              Close
+            </button>
+            {pdfUrl && (
+              <a
+                href={pdfUrl}
+                download={pdfFilename || "stand.pdf"}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 h-10 rounded-xl text-sm font-semibold"
+                style={{ background: "linear-gradient(135deg, hsl(154 100% 42%), hsl(154 80% 36%))", color: "hsl(209 65% 10%)" }}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Request Changes Modal ────────────────────────────────────────────────────
 function RequestModal({ exhibitorId, section, onClose }: { exhibitorId: number; section: string; onClose: () => void }) {
   const [message, setMessage] = useState("");
@@ -409,6 +518,7 @@ export default function GraphicsPage() {
   // modals
   const [showApprove, setShowApprove]     = useState(false);
   const [showRequest, setShowRequest]     = useState(false);
+  const [showViewPdf, setShowViewPdf]     = useState(false);
 
   const reload = async () => {
     const data = await apiFetch<GraphicElement[]>("/portal/me/exhibitor/graphics");
@@ -540,16 +650,26 @@ export default function GraphicsPage() {
               </p>
             </div>
           </div>
-          {exhibitorId && (
+          <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => setShowRequest(true)}
-              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shrink-0"
-              style={{ background: "hsl(45 100% 94%)", color: "hsl(38 80% 28%)", border: "1px solid hsl(45 80% 78%)" }}
+              onClick={() => setShowViewPdf(true)}
+              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"
+              style={{ background: "hsl(154 60% 30%)", color: "#fff" }}
             >
-              <RotateCcw className="h-3 w-3" />
-              Request Changes
+              <Eye className="h-3 w-3" />
+              View Final Visualization
             </button>
-          )}
+            {exhibitorId && (
+              <button
+                onClick={() => setShowRequest(true)}
+                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"
+                style={{ background: "hsl(45 100% 94%)", color: "hsl(38 80% 28%)", border: "1px solid hsl(45 80% 78%)" }}
+              >
+                <RotateCcw className="h-3 w-3" />
+                Request Changes
+              </button>
+            )}
+          </div>
         </div>
       ) : canApprove ? (
         <div className="flex items-center justify-between gap-4 rounded-xl px-4 py-3"
@@ -778,6 +898,9 @@ export default function GraphicsPage() {
       )}
       {showRequest && exhibitorId && (
         <RequestModal exhibitorId={exhibitorId} section="graphics" onClose={() => setShowRequest(false)} />
+      )}
+      {showViewPdf && (
+        <ViewFinalPdfModal onClose={() => setShowViewPdf(false)} />
       )}
     </div>
   );
