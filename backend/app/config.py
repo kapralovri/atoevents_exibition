@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     max_upload_bytes: int = 500 * 1024 * 1024
     preview_max_bytes: int = 1024 * 1024
+    # Graphics processing memory guards (see services/graphics_validation.py)
+    preview_max_side_px: int = 4096           # long side of generated previews
+    graphics_max_pixels: int = 300_000_000    # hard cap on decoded raster size
+    graphics_lock_timeout_seconds: float = 120.0  # wait for the processing slot
 
     # Rate limiting (in-memory, per worker process)
     rate_limit_enabled: bool = True
