@@ -46,7 +46,9 @@ from app.services.email_service import (
 )
 from app.services.graphics_validation import (
     ALLOWED_EXTENSIONS,
+    GraphicsBusyError,
     build_preview_jpeg_from_path,
+    heavy_image_slot,
     validate_graphic_from_path,
 )
 from app.services.recipients import event_recipient_emails
@@ -706,7 +708,23 @@ def _finalize_graphic_upload(
             storage.delete_object(s3_key)
             raise HTTPException(400, msg)
 
-        preview_bytes = build_preview_jpeg_from_path(tmp.name)
+        # Decoding print-size graphics is memory-heavy: one job at a time per
+        # container (validation above only reads headers).
+        try:
+            with heavy_image_slot():
+                preview_bytes = build_preview_jpeg_from_path(tmp.name)
+        except GraphicsBusyError:
+            # Multipart uploads are already completed at this point and cannot
+            # be re-confirmed, so drop the object instead of orphaning it.
+            storage.delete_object(s3_key)
+            raise HTTPException(
+                503,
+                "The server is processing other graphics right now. Please upload the file again in a minute.",
+                headers={"Retry-After": "30"},
+            )
+        except Exception as e:  # noqa: BLE001 — unreadable pixel data
+            storage.delete_object(s3_key)
+            raise HTTPException(400, f"Could not read the image data, the file may be corrupted: {e}")
         preview_key = storage.new_upload_key(
             f"events/{ex.event_id}/exhibitors/{ex.id}/previews", f"{slot_key}.jpg"
         )
